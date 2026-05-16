@@ -1,0 +1,17 @@
+{
+  "name": "@trail/tracker",
+  "version": "0.1.0",
+  "description": "Lightweight browser tracker — visitor_id + session detection + attribution ping",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

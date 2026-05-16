@@ -1,0 +1,21 @@
+{
+  "name": "trail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-touch attribution for marketing agents. Every customer leaves a trail.",
+  "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}
