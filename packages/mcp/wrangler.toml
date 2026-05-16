@@ -8,10 +8,6 @@ binding = "DB"
 database_name = "trail"
 database_id = "71944b5b-1645-435d-adcc-65e592dd17f9"
 
-[[durable_objects.bindings]]
-name = "MCP_AGENT"
-class_name = "TrailMCP"
-
 [[migrations]]
-tag = "v1"
-new_sqlite_classes = ["TrailMCP"]
+tag = "v2"
+deleted_classes = ["TrailMCP"]
