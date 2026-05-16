@@ -50,7 +50,10 @@ function trackForms(): void {
 }
 
 function init(): void {
-  const script = document.currentScript as HTMLScriptElement | null;
+  // document.currentScript is null for async scripts (e.g. loaded via GTM)
+  // Fall back to querying the DOM for the script element
+  const script = (document.currentScript as HTMLScriptElement | null)
+    ?? document.querySelector<HTMLScriptElement>('script[src*="t.js"][data-account-id]');
   _accountId = script?.dataset["accountId"] ?? TRAIL_ACCOUNT_ID;
   _apiUrl = script?.dataset["apiUrl"] ?? TRAIL_API_URL;
   _visitorId = getOrCreateVisitorId();
