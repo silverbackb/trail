@@ -134,6 +134,69 @@ export class TrailMCP extends McpAgent<Env, Record<string, never>, Record<string
       }
     );
 
+    // trail_create_account — create a client account and return the tracker snippet
+    this.server.registerTool(
+      "trail_create_account",
+      {
+        description: "Create a new client account in Trail and return the ready-to-paste tracker snippet. Use this when onboarding a new client. The snippet must be added before </body> on the client's site.",
+        inputSchema: {
+          name:   z.string().describe("Client or company name, e.g. 'Veillance Contrôle'"),
+          domain: z.string().describe("Client website domain without protocol, e.g. 'veillance-controle.fr'"),
+        },
+      },
+      async ({ name, domain }) => {
+        const account_id = domain
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "");
+
+        await this.env.DB
+          .prepare("INSERT OR IGNORE INTO accounts (account_id, name, domain) VALUES (?, ?, ?)")
+          .bind(account_id, name, domain)
+          .run();
+
+        const snippet = `<script src="https://trail-api.cvescan-pro.workers.dev/t.js"
+  data-account-id="${account_id}"
+  async defer></script>`;
+
+        return {
+          content: [{
+            type: "text",
+            text: `Account created: ${name}\nAccount ID: ${account_id}\n\nTracker snippet (paste before </body>):\n\n${snippet}`,
+          }],
+        };
+      }
+    );
+
+    // trail_list_accounts — list all registered client accounts
+    this.server.registerTool(
+      "trail_list_accounts",
+      {
+        description: "List all Trail client accounts. Use to see which clients are tracked and get their account IDs.",
+        inputSchema: {},
+      },
+      async () => {
+        const rows = await this.env.DB
+          .prepare("SELECT account_id, name, domain, created_at FROM accounts ORDER BY created_at DESC")
+          .all<{ account_id: string; name: string; domain: string; created_at: string }>();
+
+        if (!rows.results.length) {
+          return { content: [{ type: "text", text: "No accounts yet. Use trail_create_account to add your first client." }] };
+        }
+
+        const lines = rows.results.map((r) =>
+          `• ${r.name}\n  ID: ${r.account_id}\n  Domain: ${r.domain}\n  Added: ${r.created_at}`
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: `Trail accounts (${rows.results.length}):\n\n${lines.join("\n\n")}`,
+          }],
+        };
+      }
+    );
+
     // trail_get_channel_performance — channel breakdown
     this.server.registerTool(
       "trail_get_channel_performance",

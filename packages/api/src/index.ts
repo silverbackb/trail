@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { ConvertSchema, TouchpointSchema } from "./schema.js";
+import { TRACKER_SCRIPT } from "./tracker.js";
 
 export interface Env {
   DB: D1Database;
@@ -9,6 +10,14 @@ export interface Env {
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"] }));
+
+// GET /t.js — serve the tracker script
+app.get("/t.js", (c) => {
+  return c.body(TRACKER_SCRIPT, 200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "public, max-age=3600",
+  });
+});
 
 // POST /t — receive touchpoint from tracker script
 app.post("/t", async (c) => {

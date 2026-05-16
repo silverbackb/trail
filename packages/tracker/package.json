@@ -5,12 +5,13 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "esbuild src/index.ts --bundle --minify --format=iife --outfile=dist/t.js --define:TRAIL_ACCOUNT_ID='\"\"' --define:TRAIL_API_URL='\"https://trail-api.cvescan-pro.workers.dev\"'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "^0.21.5",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   }
