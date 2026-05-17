@@ -38,6 +38,27 @@ export function createApiRoutes(db: DatabaseSync) {
     });
   });
 
+  app.get("/accounts/summary", (c) => {
+    const rows = db.prepare(`
+      SELECT
+        a.account_id,
+        a.name,
+        a.domain,
+        COUNT(DISTINCT t.visitor_id)           AS visitors,
+        COUNT(DISTINCT t.lead_id)              AS leads,
+        MAX(t.created_at)                      AS last_touch
+      FROM accounts a
+      LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
+      GROUP BY a.account_id
+      ORDER BY last_touch DESC
+    `).all() as { account_id: string; name: string; domain: string; visitors: number; leads: number; last_touch: string | null }[];
+
+    return c.json(rows.map((r) => ({
+      ...r,
+      last_touch: r.last_touch ? new Date(r.last_touch + "Z").toISOString() : null,
+    })));
+  });
+
   app.post("/t", async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = TouchpointSchema.safeParse(body);
