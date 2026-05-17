@@ -75,6 +75,21 @@ export function createApiRoutes(db: DatabaseSync) {
     return c.json({ ok: true, session: sessionNum });
   });
 
+  app.get("/journey/:visitor_id", (c) => {
+    const visitor_id = c.req.param("visitor_id");
+    const account_id = c.req.query("account_id");
+
+    const rows = db.prepare(`
+      SELECT session_num, ch_type, ch_source, ch_medium, ch_campaign, ch_term,
+             gclid, fbclid, landing_url, referrer, hostname, created_at
+      FROM visitor_touchpoints
+      WHERE visitor_id=? ${account_id ? "AND account_id=?" : ""}
+      ORDER BY session_num ASC
+    `).all(...(account_id ? [visitor_id, account_id] : [visitor_id])) as Record<string, unknown>[];
+
+    return c.json({ visitor_id, sessions: rows });
+  });
+
   app.post("/convert", async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = ConvertSchema.safeParse(body);
