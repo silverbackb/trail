@@ -15,7 +15,7 @@ Session 1 — google_ads        (clicked a Google Ad)
 Session 2 — direct            (came back directly)
 Session 3 — google_profile    (clicked the Google Business link)
                ↓
-         form submitted → lead linked to all 3 touchpoints
+         form submitted → trail_vid injected → lead linked to all 3 touchpoints
 ```
 
 Query the data through an MCP server — ask your AI agent "where are my leads coming from?" and get a real answer.
@@ -35,17 +35,24 @@ Query the data through an MCP server — ask your AI agent "where are my leads c
 | Referrer = social network | `organic_social` |
 | Nothing | `direct` |
 
-UTM parameters are persisted in `sessionStorage` — if a visitor lands with UTMs then navigates to `/contact`, the channel is preserved when they submit the form.
+Click IDs (`gclid`, `fbclid`…) take priority over `utm_source`. UTM parameters are persisted in `sessionStorage` — if a visitor lands with UTMs then navigates to `/contact`, the channel is preserved when they submit the form.
 
 ---
 
 ## Installation
 
-### Option 1 — Self-hosted (Node.js + SQLite)
+### Self-hosted (Node.js + SQLite)
+
+Requires Node.js 22+.
 
 ```bash
-npm install -g @trail/server
-trail
+npm install @silverbackbase/trail
+```
+
+Or run directly:
+
+```bash
+npx @silverbackbase/trail
 ```
 
 Starts on `http://localhost:3000`. SQLite database created automatically at `~/.trail/trail.db`.
@@ -58,50 +65,56 @@ Add the tracker to your site:
   async defer></script>
 ```
 
-### Option 2 — Cloudflare Workers + D1
+### Deploy to Railway
 
-Deploy your own instance on Cloudflare Workers with a D1 database.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com)
 
 ```bash
-git clone https://github.com/SilverBackBase/Trail.git
+git clone https://github.com/silverbackb/Trail.git
 cd trail
 pnpm install
+pnpm --filter @trail/tracker run build
+pnpm --filter @silverbackbase/trail run build
 ```
 
-Create the D1 database:
-
-```bash
-npx wrangler d1 create trail
-# copy the database_id into packages/api/wrangler.toml and packages/mcp/wrangler.toml
-```
-
-Apply migrations:
-
-```bash
-npx wrangler d1 execute trail --file=packages/api/migrations/001_init.sql --remote
-```
-
-Deploy:
-
-```bash
-cd packages/api && npx wrangler deploy
-cd packages/mcp && npx wrangler deploy
-```
+Set `DB_PATH=/data/trail.db` and `TRAIL_URL=https://your-domain.com` in your Railway environment variables.
 
 ---
 
 ## GTM installation
 
-If you use Google Tag Manager, create a **Custom HTML** tag with:
+If you use Google Tag Manager, create a **Custom HTML** tag with two script blocks:
 
 ```html
-<script>window.TRAIL_ACCOUNT_ID = "your-site";</script>
-<script src="https://your-api.workers.dev/t.js" async defer></script>
+<script>
+  window.trailConfig = {
+    accountId: "your-site"
+  };
+</script>
+<script src="https://trail.silverbackbase.com/t.js" async defer></script>
 ```
 
 Set trigger to **All Pages**.
 
-> GTM strips `data-*` attributes from injected scripts — use `window.TRAIL_ACCOUNT_ID` instead.
+---
+
+## Form conversion
+
+Trail automatically detects form submissions. At submit time, it injects a hidden `trail_vid` field into the form — your backend, CRM, or webhook receives it alongside the other form fields, no extra code required.
+
+To manually trigger a conversion (e.g. from a custom flow):
+
+```javascript
+fetch('https://trail.silverbackbase.com/convert', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    visitor_id: document.cookie.match(/trail_vid=([^;]+)/)?.[1],
+    account_id: 'your-site',
+    lead_id: 'contact@example.com',
+  }),
+});
+```
 
 ---
 
@@ -109,12 +122,20 @@ Set trigger to **All Pages**.
 
 Trail exposes an MCP server so your AI agent can query attribution data directly.
 
-Add to your `~/.claude.json`:
+**Claude Code:**
+```bash
+claude mcp add trail --transport http https://trail.silverbackbase.com/mcp
+```
 
+**Claude Desktop / Cursor** (`mcp.json`):
 ```json
-"trail": {
-  "type": "http",
-  "url": "https://your-mcp.workers.dev/mcp"
+{
+  "mcpServers": {
+    "trail": {
+      "type": "http",
+      "url": "https://trail.silverbackbase.com/mcp"
+    }
+  }
 }
 ```
 
@@ -122,12 +143,14 @@ Available tools:
 
 | Tool | Description |
 |------|-------------|
-| `trail_create_account` | Create a client account, get the tracker snippet |
+| `trail_create_account` | Create a client account, get the tracker snippet (header or GTM) |
 | `trail_list_accounts` | List all accounts |
+| `trail_get_recent_sessions` | Check that the tracker is receiving visits (no conversion required) |
+| `trail_list_leads` | List leads with acquisition channel and conversion date |
 | `trail_get_journey` | Full touchpoint journey for a lead |
-| `trail_get_report` | Attribution report by channel |
-| `trail_get_top_paths` | Most common multi-touch paths |
-| `trail_get_channel_performance` | Visitors / leads / conversions per channel |
+| `trail_get_report` | Attribution report by channel (first / last / linear) |
+| `trail_get_top_paths` | Most common multi-touch paths before conversion |
+| `trail_get_channel_performance` | Visitors / leads / conversion rate per channel |
 
 ---
 
@@ -135,9 +158,8 @@ Available tools:
 
 ```
 packages/
-  tracker/   Browser script — visitor ID, session detection, channel capture
-  api/       HTTP API — receives touchpoints, stores to DB
-  mcp/       MCP server — exposes attribution tools to AI agents
+  tracker/   Browser script — visitor ID, session detection, channel capture (~3kb)
+  server/    Node.js server — HTTP API + MCP + SQLite
 ```
 
 ---
@@ -145,12 +167,12 @@ packages/
 ## Stack
 
 - **Tracker** — vanilla TypeScript, compiled to ~3kb IIFE via esbuild
-- **API** — Hono (runs on Cloudflare Workers or Node.js)
-- **Database** — Cloudflare D1 (cloud) or SQLite via better-sqlite3 (self-hosted)
-- **MCP** — `@modelcontextprotocol/sdk` with stateless Streamable HTTP transport
+- **Server** — Hono + `@hono/node-server`
+- **Database** — SQLite via `node:sqlite` (built-in Node 22+)
+- **MCP** — `@modelcontextprotocol/sdk` with Streamable HTTP transport
 
 ---
 
 ## License
 
-MIT — part of the [SilverBackBase](https://github.com/SilverBackBase) ecosystem.
+MIT — part of the [SilverBackBase](https://silverbackbase.com) ecosystem.
