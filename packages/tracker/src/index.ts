@@ -57,17 +57,16 @@ function trackForms(): void {
 }
 
 function init(): void {
-  // Priority: data attribute > window variable > compile-time constant
-  // GTM strips data-* attributes on inject, so window.TRAIL_ACCOUNT_ID is the GTM fallback
-  const w = window as unknown as Record<string, string>;
+  // Priority: data attribute > window.trailConfig (GTM) > compile-time constant
+  const w = window as unknown as { trailConfig?: { accountId?: string; apiUrl?: string } };
   const script = (document.currentScript as HTMLScriptElement | null)
     ?? document.querySelector<HTMLScriptElement>('script[src*="t.js"][data-account-id]');
-  _accountId = script?.dataset["accountId"] ?? w["TRAIL_ACCOUNT_ID"] ?? TRAIL_ACCOUNT_ID;
+  _accountId = script?.dataset["accountId"] ?? w.trailConfig?.accountId ?? TRAIL_ACCOUNT_ID;
 
-  // Priority: data-api-url > window.TRAIL_API_URL > auto-detect from script src > compile-time constant
+  // Priority: data-api-url > window.trailConfig.apiUrl > auto-detect from script src > compile-time constant
   const scriptSrc = script?.src;
   const autoUrl = scriptSrc ? new URL(scriptSrc).origin : "";
-  _apiUrl = script?.dataset["apiUrl"] ?? w["TRAIL_API_URL"] ?? autoUrl ?? TRAIL_API_URL;
+  _apiUrl = script?.dataset["apiUrl"] ?? w.trailConfig?.apiUrl ?? autoUrl ?? TRAIL_API_URL;
   _visitorId = getOrCreateVisitorId();
 
   trackSession();

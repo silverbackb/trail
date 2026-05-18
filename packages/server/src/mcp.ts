@@ -13,20 +13,31 @@ function buildServer(db: DatabaseSync): McpServer {
   const server = new McpServer({ name: "trail", version: "0.1.0" });
 
   server.registerTool("trail_create_account", {
-    description: "Create a new client account in Trail and return the ready-to-paste tracker snippet.",
+    description: "Create a new client account in Trail and return the ready-to-paste tracker snippet. Always ask the user whether they will install via Google Tag Manager (gtm) or directly in the site HTML header (header) before calling this tool.",
     inputSchema: {
-      name:   z.string().describe("Client or company name"),
-      domain: z.string().describe("Client website domain without protocol, e.g. 'client.fr'"),
+      name:           z.string().describe("Client or company name"),
+      domain:         z.string().describe("Client website domain without protocol, e.g. 'client.fr'"),
+      install_method: z.enum(["header", "gtm"]).describe("Installation method: 'header' for direct <script> tag in HTML, 'gtm' for Google Tag Manager Custom HTML tag"),
     },
-  }, async ({ name, domain }) => {
+  }, async ({ name, domain, install_method }) => {
     const account_id = domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const baseUrl = process.env.TRAIL_URL ?? "http://localhost:3000";
 
     db.prepare("INSERT OR IGNORE INTO accounts (account_id, name, domain) VALUES (?, ?, ?)")
       .run(account_id, name, domain);
 
-    const snippet = `<script src="${baseUrl}/t.js"\n  data-account-id="${account_id}"\n  async defer></script>`;
-    return { content: [{ type: "text", text: `Account created: ${name}\nID: ${account_id}\n\nSnippet:\n\n${snippet}` }] };
+    let snippet: string;
+    let instructions: string;
+
+    if (install_method === "gtm") {
+      snippet = `<script>\n  window.trailConfig = {\n    accountId: "${account_id}"\n  };\n</script>\n<script src="${baseUrl}/t.js" async defer></script>`;
+      instructions = `GTM installation:\n1. Dans GTM, créer une nouvelle balise "HTML personnalisé"\n2. Coller le snippet ci-dessous\n3. Déclencher sur : All Pages (ou votre déclencheur principal)\n4. Publier le conteneur`;
+    } else {
+      snippet = `<script src="${baseUrl}/t.js"\n  data-account-id="${account_id}"\n  async defer></script>`;
+      instructions = `Installation dans le <head> du site, avant </head>.`;
+    }
+
+    return { content: [{ type: "text", text: `Account created: ${name}\nID: ${account_id}\n\n${instructions}\n\nSnippet:\n\n${snippet}` }] };
   });
 
   server.registerTool("trail_list_accounts", {
