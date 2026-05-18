@@ -54,7 +54,7 @@ function trackForms(): void {
       }),
       keepalive: true,
     }).catch(() => {});
-  });
+  }, { capture: true });
 }
 
 function init(): void {
