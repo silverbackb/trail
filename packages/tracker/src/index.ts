@@ -33,29 +33,6 @@ function trackSession(): void {
   }).catch(() => {});
 }
 
-function trackForms(): void {
-  document.addEventListener("submit", (e) => {
-    const form = e.target as HTMLFormElement;
-
-    // Try to grab an email as lead_id, fall back to visitor_id
-    const emailInput = form.querySelector<HTMLInputElement>(
-      'input[type="email"], input[name*="email"], input[id*="email"]'
-    );
-    const leadId = emailInput?.value?.trim() || _visitorId;
-
-    fetch(`${_apiUrl}/convert`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        visitor_id: _visitorId,
-        account_id: _accountId,
-        lead_id: leadId,
-      }),
-      keepalive: true,
-    }).catch(() => {});
-  });
-}
-
 function init(): void {
   // Priority: data attribute > window.trailConfig (GTM) > compile-time constant
   const w = window as unknown as { trailConfig?: { accountId?: string; apiUrl?: string } };
@@ -70,7 +47,6 @@ function init(): void {
   _visitorId = getOrCreateVisitorId();
 
   trackSession();
-  trackForms();
 }
 
 if (document.readyState === "loading") {
