@@ -33,6 +33,28 @@ function trackSession(): void {
   }).catch(() => {});
 }
 
+function injectVisitorId(): void {
+  function addField(form: HTMLFormElement): void {
+    if (form.querySelector('input[name="trail_vid"]')) return;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "trail_vid";
+    input.value = _visitorId;
+    form.appendChild(input);
+  }
+
+  document.querySelectorAll("form").forEach((f) => addField(f as HTMLFormElement));
+
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      m.addedNodes.forEach((node) => {
+        if (node instanceof HTMLFormElement) addField(node);
+        else if (node instanceof Element) node.querySelectorAll("form").forEach((f) => addField(f as HTMLFormElement));
+      });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 function trackForms(): void {
   document.addEventListener("submit", () => {
     fetch(`${_apiUrl}/convert`, {
@@ -62,6 +84,7 @@ function init(): void {
   _visitorId = getOrCreateVisitorId();
 
   trackSession();
+  injectVisitorId();
   trackForms();
 }
 
