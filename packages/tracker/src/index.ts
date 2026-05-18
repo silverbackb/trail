@@ -33,6 +33,21 @@ function trackSession(): void {
   }).catch(() => {});
 }
 
+function trackForms(): void {
+  document.addEventListener("submit", () => {
+    fetch(`${_apiUrl}/convert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        visitor_id: _visitorId,
+        account_id: _accountId,
+        lead_id: _visitorId,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  });
+}
+
 function init(): void {
   // Priority: data attribute > window.trailConfig (GTM) > compile-time constant
   const w = window as unknown as { trailConfig?: { accountId?: string; apiUrl?: string } };
@@ -47,6 +62,7 @@ function init(): void {
   _visitorId = getOrCreateVisitorId();
 
   trackSession();
+  trackForms();
 }
 
 if (document.readyState === "loading") {

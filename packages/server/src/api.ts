@@ -140,7 +140,8 @@ export function createApiRoutes(db: DatabaseSync) {
     if (!parsed.success) return c.json({ error: "invalid" }, 400);
 
     const { visitor_id, account_id, lead_id } = parsed.data;
-    db.prepare("UPDATE visitor_touchpoints SET lead_id=?, converted=1 WHERE visitor_id=? AND account_id=? AND lead_id IS NULL")
+    // Allow overriding a visitor_id-based lead_id (auto-detected by tracker) with a real email
+    db.prepare("UPDATE visitor_touchpoints SET lead_id=?, converted=1 WHERE visitor_id=? AND account_id=? AND (lead_id IS NULL OR lead_id=visitor_id)")
       .run(lead_id, visitor_id, account_id);
 
     return c.json({ ok: true });
