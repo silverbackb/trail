@@ -26,7 +26,9 @@ export interface JourneyEntry {
   session_num: number; ch_type: string | null; ch_source: string | null;
   ch_medium: string | null; ch_campaign: string | null; ch_term: string | null;
   gclid: string | null; fbclid: string | null; landing_url: string | null;
-  referrer: string | null; hostname: string | null; created_at: string;
+  referrer: string | null; hostname: string | null;
+  time_on_page_sec: number | null; scroll_depth_pct: number | null;
+  created_at: string;
 }
 
 export interface AccountRow { account_id: string; name: string; domain: string; created_at: string; }
@@ -147,8 +149,8 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async getJourneyByVisitor(visitorId, accountId) {
       const sql = accountId
-        ? `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,created_at FROM visitor_touchpoints WHERE visitor_id=? AND account_id=? ORDER BY session_num ASC`
-        : `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,created_at FROM visitor_touchpoints WHERE visitor_id=? ORDER BY session_num ASC`;
+        ? `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? AND account_id=? ORDER BY session_num ASC`
+        : `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? ORDER BY session_num ASC`;
       return accountId ? s<JourneyEntry>(sql).all(visitorId, accountId) : s<JourneyEntry>(sql).all(visitorId);
     },
     async convertVisitor(leadId, visitorId, accountId, timeOnPageSec, scrollDepthPct) {
@@ -289,8 +291,8 @@ function createPostgresDB(url: string): TrailDB {
     async getJourneyByVisitor(visitorId, accountId) {
       await init();
       const rows = accountId
-        ? await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY session_num ASC`
-        : await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} ORDER BY session_num ASC`;
+        ? await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY session_num ASC`
+        : await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} ORDER BY session_num ASC`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as JourneyEntry[];
     },
     async convertVisitor(leadId, visitorId, accountId, timeOnPageSec, scrollDepthPct) {
