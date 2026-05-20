@@ -1,0 +1,23 @@
+{
+  "name": "trail",
+  "version": "0.1.0",
+  "description": "Multi-touch attribution tracker — reconstructs the full visitor journey across sessions before a form submission.",
+  "author": {
+    "name": "SilverbackBase",
+    "email": "hello@silverbackbase.com",
+    "url": "https://silverbackbase.com"
+  },
+  "homepage": "https://silverbackbase.com/trail",
+  "repository": "https://github.com/SilverBackBase/Trail",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Trail — Attribution",
+    "shortDescription": "Multi-touch attribution tracker for AI agents",
+    "longDescription": "Trail tracks every visitor session and reconstructs the full acquisition path before a lead submits a form. The agent queries this data to answer attribution questions, build reports, and diagnose channel performance — without any dashboard.",
+    "category": "Marketing",
+    "capabilities": ["Read"],
+    "websiteURL": "https://silverbackbase.com/trail"
+  }
+}

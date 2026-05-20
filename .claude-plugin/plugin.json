@@ -1,0 +1,11 @@
+{
+  "name": "trail",
+  "description": "Multi-touch attribution tracker — reconstructs the full visitor journey across sessions before a form submission. Exposes data via MCP tools consumed by the agent.",
+  "version": "0.1.0",
+  "author": {
+    "name": "SilverbackBase",
+    "url": "https://silverbackbase.com"
+  },
+  "homepage": "https://silverbackbase.com/trail",
+  "repository": "https://github.com/SilverBackBase/Trail"
+}

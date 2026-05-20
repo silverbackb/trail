@@ -9,7 +9,7 @@ function toLocalTime(utc: string): string {
   return new Date(utc + "Z").toLocaleString("fr-FR", { timeZone: tz, hour12: false });
 }
 
-function buildServer(db: DatabaseSync): McpServer {
+export function buildServer(db: DatabaseSync): McpServer {
   const server = new McpServer({ name: "trail", version: "0.1.0" });
 
   server.registerTool("trail_create_account", {

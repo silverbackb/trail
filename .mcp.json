@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trail": {
+      "command": "npx",
+      "args": ["-y", "--package=@silverbackbase/trail", "trail-mcp"]
+    }
+  }
+}
