@@ -2,14 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import type { Context } from "hono";
-import type { DatabaseSync } from "node:sqlite";
+import type { TrailDB } from "./db.js";
 
 function toLocalTime(utc: string): string {
   const tz = process.env.TRAIL_TZ ?? "Europe/Paris";
-  return new Date(utc + "Z").toLocaleString("fr-FR", { timeZone: tz, hour12: false });
+  const suffix = utc.includes("T") ? "" : "Z";
+  return new Date(utc + suffix).toLocaleString("fr-FR", { timeZone: tz, hour12: false });
 }
 
-export function buildServer(db: DatabaseSync): McpServer {
+export function buildServer(db: TrailDB): McpServer {
   const server = new McpServer({ name: "trail", version: "0.1.0" });
 
   server.registerTool("trail_create_account", {
@@ -23,8 +24,7 @@ export function buildServer(db: DatabaseSync): McpServer {
     const account_id = domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const baseUrl = process.env.TRAIL_URL ?? "http://localhost:3000";
 
-    db.prepare("INSERT OR IGNORE INTO accounts (account_id, name, domain) VALUES (?, ?, ?)")
-      .run(account_id, name, domain);
+    await db.createAccount(account_id, name, domain);
 
     let snippet: string;
     let instructions: string;
@@ -44,11 +44,8 @@ export function buildServer(db: DatabaseSync): McpServer {
     description: "List all Trail client accounts with their account_id. Use this first to get the account_id needed by all other tools.",
     inputSchema: {},
   }, async () => {
-    const rows = db.prepare("SELECT account_id, name, domain, created_at FROM accounts ORDER BY created_at DESC").all() as
-      { account_id: string; name: string; domain: string; created_at: string }[];
-
+    const rows = await db.listAccounts();
     if (!rows.length) return { content: [{ type: "text", text: "No accounts yet." }] };
-
     const lines = rows.map((r) => `• ${r.name}\n  ID: ${r.account_id}\n  Domain: ${r.domain}\n  Added: ${toLocalTime(r.created_at)}`);
     return { content: [{ type: "text", text: `Trail accounts (${rows.length}):\n\n${lines.join("\n\n")}` }] };
   });
@@ -60,16 +57,8 @@ export function buildServer(db: DatabaseSync): McpServer {
       limit: z.number().int().min(1).max(50).default(10),
     },
   }, async ({ account_id, limit }) => {
-    const rows = db.prepare(`
-      SELECT visitor_id, ch_type, ch_source, ch_campaign, landing_url, lead_id, created_at
-      FROM visitor_touchpoints
-      WHERE account_id=?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `).all(account_id, limit) as { visitor_id: string; ch_type: string; ch_source: string | null; ch_campaign: string | null; landing_url: string | null; lead_id: string | null; created_at: string }[];
-
+    const rows = await db.getRecentSessions(account_id, limit);
     if (!rows.length) return { content: [{ type: "text", text: `No sessions found for account "${account_id}". The tracker is either not installed, not yet triggered, or using a different account_id.` }] };
-
     const lines = rows.map((r) => {
       const source = r.ch_source ? ` | source: ${r.ch_source}` : "";
       const campaign = r.ch_campaign ? ` | campaign: ${r.ch_campaign}` : "";
@@ -87,11 +76,8 @@ export function buildServer(db: DatabaseSync): McpServer {
       account_id: z.string().describe("Trail account ID"),
     },
   }, async ({ lead_id, account_id }) => {
-    const rows = db.prepare("SELECT * FROM visitor_touchpoints WHERE lead_id=? AND account_id=? ORDER BY session_num ASC")
-      .all(lead_id, account_id) as Record<string, unknown>[];
-
+    const rows = await db.getJourneyByLead(lead_id, account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No journey found for lead "${lead_id}" on account "${account_id}". This lead either does not exist or has not submitted a form yet. Use trail_list_leads to see all known leads.` }] };
-
     const lines = rows.map((r) =>
       `Session ${r["session_num"]} — ${toLocalTime(r["created_at"] as string)}\n  Channel: ${r["ch_type"]} | Source: ${r["ch_source"] ?? "direct"} | Campaign: ${r["ch_campaign"] ?? "—"}\n  URL: ${r["landing_url"]}`
     );
@@ -105,17 +91,8 @@ export function buildServer(db: DatabaseSync): McpServer {
       model: z.enum(["first_touch", "last_touch", "linear"]).default("last_touch"),
     },
   }, async ({ account_id, model }) => {
-    const rows = db.prepare(`
-      SELECT ch_type,
-        COUNT(DISTINCT lead_id) as leads,
-        SUM(CASE WHEN converted=1 THEN 1 ELSE 0 END) as conversions
-      FROM visitor_touchpoints
-      WHERE account_id=? AND lead_id IS NOT NULL
-      GROUP BY ch_type ORDER BY conversions DESC
-    `).all(account_id) as { ch_type: string; leads: number; conversions: number }[];
-
+    const rows = await db.getChannelReport(account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No attribution data for "${account_id}". No form submissions have been recorded yet. To verify the tracker is working, use trail_get_recent_sessions.` }] };
-
     const total = rows.reduce((s, r) => s + r.leads, 0);
     const lines = rows.map((r) => {
       const pct = total > 0 ? Math.round((r.leads / total) * 100) : 0;
@@ -131,21 +108,13 @@ export function buildServer(db: DatabaseSync): McpServer {
       limit: z.number().int().min(1).max(20).default(10),
     },
   }, async ({ account_id, limit }) => {
-    const rows = db.prepare(`
-      SELECT lead_id, GROUP_CONCAT(ch_type, ' → ') as path
-      FROM (SELECT lead_id, ch_type FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL ORDER BY lead_id, session_num)
-      GROUP BY lead_id
-    `).all(account_id) as { lead_id: string; path: string }[];
-
+    const rows = await db.getTopPaths(account_id);
     if (!rows.length) return { content: [{ type: "text", text: "No path data found. No form submissions have been recorded yet." }] };
-
     const freq: Record<string, number> = {};
     for (const r of rows) freq[r.path] = (freq[r.path] ?? 0) + 1;
-
     const paths = Object.entries(freq)
       .sort(([, a], [, b]) => b - a).slice(0, limit)
       .map(([path, count], i) => `${i + 1}. ${path}  (${count} leads)`);
-
     return { content: [{ type: "text", text: `Top ${limit} paths:\n\n${paths.join("\n")}` }] };
   });
 
@@ -153,17 +122,8 @@ export function buildServer(db: DatabaseSync): McpServer {
     description: "Get a full performance breakdown by channel: total visitors (all sessions), leads (form submissions), and conversion rate. Unlike trail_get_report, this shows ALL visitors including those who never submitted a form. Use this to understand traffic quality per channel.",
     inputSchema: { account_id: z.string().describe("Trail account ID") },
   }, async ({ account_id }) => {
-    const rows = db.prepare(`
-      SELECT ch_type,
-        COUNT(DISTINCT visitor_id) as visitors,
-        COUNT(DISTINCT lead_id) as leads,
-        SUM(CASE WHEN converted=1 THEN 1 ELSE 0 END) as conversions
-      FROM visitor_touchpoints WHERE account_id=?
-      GROUP BY ch_type ORDER BY visitors DESC
-    `).all(account_id) as { ch_type: string; visitors: number; leads: number; conversions: number }[];
-
+    const rows = await db.getChannelPerformance(account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No data for "${account_id}". The tracker has not recorded any sessions yet. Check that the snippet is installed and that the account_id matches exactly.` }] };
-
     const lines = rows.map((r) => {
       const rate = r.leads > 0 ? Math.round((r.conversions / r.leads) * 100) : 0;
       return `${r.ch_type.padEnd(20)} ${String(r.visitors).padStart(6)} visitors  ${String(r.leads).padStart(4)} leads  ${r.conversions} won  (${rate}%)`;
@@ -178,17 +138,8 @@ export function buildServer(db: DatabaseSync): McpServer {
       limit: z.number().int().min(1).max(100).default(20),
     },
   }, async ({ account_id, limit }) => {
-    const rows = db.prepare(`
-      SELECT lead_id, ch_type, created_at
-      FROM visitor_touchpoints
-      WHERE account_id=? AND lead_id IS NOT NULL
-      GROUP BY lead_id
-      ORDER BY MAX(created_at) DESC
-      LIMIT ?
-    `).all(account_id, limit) as { lead_id: string; ch_type: string; created_at: string }[];
-
+    const rows = await db.listLeads(account_id, limit);
     if (!rows.length) return { content: [{ type: "text", text: `No leads yet for "${account_id}". No visitor has submitted a form on this account's website. The tracker may still be working correctly — use trail_get_recent_sessions to check.` }] };
-
     const lines = rows.map((r) => `• ${r.lead_id}  |  ${r.ch_type}  |  ${toLocalTime(r.created_at)}`);
     return { content: [{ type: "text", text: `Leads (${rows.length}):\n\n${lines.join("\n")}` }] };
   });
@@ -196,7 +147,7 @@ export function buildServer(db: DatabaseSync): McpServer {
   return server;
 }
 
-export function createMcpHandler(db: DatabaseSync) {
+export function createMcpHandler(db: TrailDB) {
   return async (c: Context) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const server = buildServer(db);

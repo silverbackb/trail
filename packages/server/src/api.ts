@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { DatabaseSync } from "node:sqlite";
+import type { TrailDB } from "./db.js";
 import { TRACKER_SCRIPT } from "./tracker.js";
 
 const TouchpointSchema = z.object({
@@ -28,7 +28,7 @@ const ConvertSchema = z.object({
   lead_id: z.string(),
 });
 
-export function createApiRoutes(db: DatabaseSync) {
+export function createApiRoutes(db: TrailDB) {
   const app = new Hono();
 
   app.get("/t.js", (c) => {
@@ -38,42 +38,22 @@ export function createApiRoutes(db: DatabaseSync) {
     });
   });
 
-  app.get("/logs/recent", (c) => {
+  app.get("/logs/recent", async (c) => {
     const limit = Math.min(parseInt(c.req.query("limit") ?? "50"), 100);
-    const rows = db.prepare(`
-      SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
-             t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at,
-             a.domain
-      FROM visitor_touchpoints t
-      LEFT JOIN accounts a ON a.account_id = t.account_id
-      ORDER BY t.created_at DESC
-      LIMIT ?
-    `).all(limit) as Record<string, unknown>[];
-
+    const rows = await db.getRecentLogs(limit);
     return c.json(rows.map((r) => ({
       ...r,
-      created_at: new Date((r.created_at as string) + "Z").toISOString(),
+      created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString(),
     })));
   });
 
-  app.get("/accounts/summary", (c) => {
-    const rows = db.prepare(`
-      SELECT
-        a.account_id,
-        a.name,
-        a.domain,
-        COUNT(DISTINCT t.visitor_id)           AS visitors,
-        COUNT(DISTINCT t.lead_id)              AS leads,
-        MAX(t.created_at)                      AS last_touch
-      FROM accounts a
-      LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
-      GROUP BY a.account_id
-      ORDER BY last_touch DESC
-    `).all() as { account_id: string; name: string; domain: string; visitors: number; leads: number; last_touch: string | null }[];
-
+  app.get("/accounts/summary", async (c) => {
+    const rows = await db.getAccountsSummary();
     return c.json(rows.map((r) => ({
       ...r,
-      last_touch: r.last_touch ? new Date(r.last_touch + "Z").toISOString() : null,
+      last_touch: r.last_touch
+        ? new Date(r.last_touch + (r.last_touch.includes("T") ? "" : "Z")).toISOString()
+        : null,
     })));
   });
 
@@ -82,7 +62,6 @@ export function createApiRoutes(db: DatabaseSync) {
     const parsed = TouchpointSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: "invalid" }, 400);
 
-    // Ignore GTM preview/debug sessions (gtm-msr.appspot.com)
     if (parsed.data.channel.landing_url?.includes("gtm-msr.appspot.com")) {
       return c.json({ ok: true, ignored: "gtm_preview" });
     }
@@ -92,45 +71,36 @@ export function createApiRoutes(db: DatabaseSync) {
       `${visitor_id}:${channel.referrer_type}:${channel.utm_source ?? ""}:${new Date().toISOString().slice(0, 10)}`
     ).toString("base64");
 
-    const exists = db.prepare("SELECT 1 FROM visitor_sessions WHERE visitor_id=? AND session_hash=?")
-      .get(visitor_id, sessionHash);
+    if (await db.sessionExists(visitor_id, sessionHash)) {
+      return c.json({ ok: true, duplicate: true });
+    }
 
-    if (exists) return c.json({ ok: true, duplicate: true });
+    const sessionNum = (await db.countVisitorTouchpoints(visitor_id, account_id)) + 1;
 
-    const countRow = db.prepare("SELECT COUNT(*) as n FROM visitor_touchpoints WHERE visitor_id=? AND account_id=?")
-      .get(visitor_id, account_id) as { n: number };
-    const sessionNum = (countRow?.n ?? 0) + 1;
-    const id = crypto.randomUUID();
+    await db.insertTouchpoint({
+      id: crypto.randomUUID(),
+      visitor_id, account_id, session_num: sessionNum,
+      ch_source: channel.utm_source ?? null,
+      ch_medium: channel.utm_medium ?? null,
+      ch_campaign: channel.utm_campaign ?? null,
+      ch_term: channel.utm_term ?? null,
+      ch_type: channel.referrer_type,
+      gclid: channel.gclid ?? null,
+      fbclid: channel.fbclid ?? null,
+      landing_url: channel.landing_url ?? null,
+      referrer: channel.referrer ?? null,
+      hostname: hostname ?? null,
+    });
 
-    db.prepare(`
-      INSERT INTO visitor_touchpoints
-        (id,visitor_id,account_id,session_num,ch_source,ch_medium,ch_campaign,ch_term,ch_type,gclid,fbclid,landing_url,referrer,hostname)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      id, visitor_id, account_id, sessionNum,
-      channel.utm_source ?? null, channel.utm_medium ?? null, channel.utm_campaign ?? null, channel.utm_term ?? null,
-      channel.referrer_type, channel.gclid ?? null, channel.fbclid ?? null,
-      channel.landing_url ?? null, channel.referrer ?? null, hostname ?? null
-    );
-
-    db.prepare("INSERT OR IGNORE INTO visitor_sessions (visitor_id,account_id,session_hash) VALUES (?,?,?)")
-      .run(visitor_id, account_id, sessionHash);
+    await db.upsertSession(visitor_id, account_id, sessionHash);
 
     return c.json({ ok: true, session: sessionNum });
   });
 
-  app.get("/journey/:visitor_id", (c) => {
+  app.get("/journey/:visitor_id", async (c) => {
     const visitor_id = c.req.param("visitor_id");
     const account_id = c.req.query("account_id");
-
-    const rows = db.prepare(`
-      SELECT session_num, ch_type, ch_source, ch_medium, ch_campaign, ch_term,
-             gclid, fbclid, landing_url, referrer, hostname, created_at
-      FROM visitor_touchpoints
-      WHERE visitor_id=? ${account_id ? "AND account_id=?" : ""}
-      ORDER BY session_num ASC
-    `).all(...(account_id ? [visitor_id, account_id] : [visitor_id])) as Record<string, unknown>[];
-
+    const rows = await db.getJourneyByVisitor(visitor_id, account_id);
     return c.json({ visitor_id, sessions: rows });
   });
 
@@ -138,12 +108,8 @@ export function createApiRoutes(db: DatabaseSync) {
     const body = await c.req.json().catch(() => null);
     const parsed = ConvertSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: "invalid" }, 400);
-
     const { visitor_id, account_id, lead_id } = parsed.data;
-    // Allow overriding a visitor_id-based lead_id (auto-detected by tracker) with a real email
-    db.prepare("UPDATE visitor_touchpoints SET lead_id=?, converted=1 WHERE visitor_id=? AND account_id=? AND (lead_id IS NULL OR lead_id=visitor_id)")
-      .run(lead_id, visitor_id, account_id);
-
+    await db.convertVisitor(lead_id, visitor_id, account_id);
     return c.json({ ok: true });
   });
 
