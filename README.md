@@ -77,7 +77,16 @@ pnpm --filter @trail/tracker run build
 pnpm --filter @silverbackbase/trail run build
 ```
 
-Set `DB_PATH=/data/trail.db` and `TRAIL_URL=https://your-domain.com` in your Railway environment variables.
+**Required environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `TRAIL_URL` | Public URL of your Trail instance (e.g. `https://trail.yoursite.com`) |
+| `DATABASE_URL` | PostgreSQL connection string. If set, Trail uses Postgres. If absent, falls back to SQLite. |
+| `DB_PATH` | SQLite file path (default: `./trail.db`). Only used when `DATABASE_URL` is not set. |
+| `TRAIL_TZ` | Timezone for MCP output (default: `Europe/Paris`) |
+
+**Storage:** Trail automatically picks the right adapter at startup — PostgreSQL when `DATABASE_URL` is set, SQLite otherwise. No migration needed: if PostgreSQL is empty on first start and a SQLite file exists, Trail migrates the data automatically.
 
 ---
 
@@ -178,7 +187,7 @@ Available tools:
 ```
 packages/
   tracker/   Browser script — visitor ID, session detection, channel capture (~3kb)
-  server/    Node.js server — HTTP API + MCP + SQLite
+  server/    Node.js server — HTTP API + MCP + SQLite / PostgreSQL
 ```
 
 ---
@@ -187,7 +196,7 @@ packages/
 
 - **Tracker** — vanilla TypeScript, compiled to ~3kb IIFE via esbuild
 - **Server** — Hono + `@hono/node-server`
-- **Database** — SQLite via `node:sqlite` (built-in Node 22+)
+- **Database** — SQLite via `node:sqlite` (built-in Node 22+) for self-hosted; PostgreSQL via `postgres` for cloud deployments
 - **MCP** — `@modelcontextprotocol/sdk` with Streamable HTTP transport
 
 ---
