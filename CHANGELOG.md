@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.3 — 2026-05-20
+
+### Corrigé
+- `GET /journey/{visitor_id}` expose maintenant `time_on_page_sec` et `scroll_depth_pct` — ces champs étaient stockés mais absents de la réponse API (Sevya ne les recevait pas)
+
 ## v0.4.2 — 2026-05-20
 
 ### Ajouté
