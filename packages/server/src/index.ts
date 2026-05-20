@@ -6,9 +6,15 @@ import { createDB } from "./db.js";
 import { createApiRoutes } from "./api.js";
 import { createMcpHandler } from "./mcp.js";
 import { requireAuth } from "./auth.js";
+import { maybeMigrateSQLiteToPG } from "./migrate.js";
 
 const port = parseInt(process.env.PORT ?? "3000");
 const dbPath = process.env.DB_PATH ?? "./trail.db";
+const pgUrl = process.env.DATABASE_URL;
+
+if (pgUrl) {
+  await maybeMigrateSQLiteToPG(dbPath, pgUrl).catch((e) => console.error("[migrate] failed:", e));
+}
 
 const db = createDB(dbPath);
 const app = new Hono();
