@@ -185,6 +185,48 @@ Available tools:
 
 ---
 
+## Ad blocker bypass (reverse proxy)
+
+By default the tracker points to `trail.silverbackbase.com`. Brave and uBlock Origin block requests to third-party domains. A reverse proxy routes tracking through your own domain — invisible to blockers.
+
+**Next.js** (`next.config.js`):
+```js
+module.exports = {
+  async rewrites() {
+    return [
+      { source: "/api/t.js", destination: "https://trail.silverbackbase.com/t.js" },
+      { source: "/api/t",    destination: "https://trail.silverbackbase.com/t" },
+    ];
+  },
+};
+```
+
+Then in the snippet, add `data-api-url=""` so the tracker uses the current domain:
+```html
+<script src="/api/t.js" data-account-id="..." data-api-url="" async defer></script>
+```
+
+**Cloudflare Worker**:
+```js
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    url.hostname = "trail.silverbackbase.com";
+    return fetch(new Request(url, request));
+  },
+};
+```
+
+**Nginx**:
+```nginx
+location /api/t {
+  proxy_pass https://trail.silverbackbase.com;
+  proxy_set_header Host trail.silverbackbase.com;
+}
+```
+
+---
+
 ## Packages
 
 ```
