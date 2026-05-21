@@ -7,17 +7,17 @@ const VALIDATE_URL = process.env.SILVERBACKBASE_URL
 
 const TRAIL_SECRET = process.env.TRAIL_VALIDATE_SECRET ?? "";
 
-type CacheEntry = { valid: boolean; workspaceId: string | null; expires: number };
+type CacheEntry = { valid: boolean; workspaceId: string | null; expires: number; isAdmin?: boolean };
 const cache = new Map<string, CacheEntry>();
 
-async function validateToken(token: string): Promise<{ valid: boolean; workspaceId: string | null }> {
+async function validateToken(token: string): Promise<{ valid: boolean; workspaceId: string | null; isAdmin?: boolean }> {
   // Cloud mode: validate against silverbackbase.com
   if (VALIDATE_URL) {
     const hash = createHash("sha256").update(token).digest("hex");
 
     const cached = cache.get(hash);
     if (cached && cached.expires > Date.now()) {
-      return { valid: cached.valid, workspaceId: cached.workspaceId };
+      return { valid: cached.valid, workspaceId: cached.workspaceId, isAdmin: cached.isAdmin };
     }
 
     try {
@@ -26,18 +26,19 @@ async function validateToken(token: string): Promise<{ valid: boolean; workspace
         headers: { "Content-Type": "application/json", "x-trail-secret": TRAIL_SECRET },
         body: JSON.stringify({ hash }),
       });
-      const data = await res.json() as { valid: boolean; workspaceId?: string | null };
+      const data = await res.json() as { valid: boolean; workspaceId?: string | null; isAdmin?: boolean };
       const valid = !!data.valid;
       const workspaceId = data.workspaceId ?? null;
-      cache.set(hash, { valid, workspaceId, expires: Date.now() + 60_000 });
-      return { valid, workspaceId };
+      const isAdmin = !!data.isAdmin;
+      cache.set(hash, { valid, workspaceId, expires: Date.now() + 60_000, isAdmin });
+      return { valid, workspaceId, isAdmin };
     } catch {
-      return { valid: false, workspaceId: null };
+      return { valid: false, workspaceId: null, isAdmin: false };
     }
   }
 
   // Self-host / dev: no auth
-  return { valid: true, workspaceId: null };
+  return { valid: true, workspaceId: null, isAdmin: false };
 }
 
 export const requireAuth: MiddlewareHandler = async (c, next) => {
@@ -47,12 +48,21 @@ export const requireAuth: MiddlewareHandler = async (c, next) => {
   }
 
   const token = auth.slice(7).trim();
-  const { valid, workspaceId } = await validateToken(token);
+  const { valid, workspaceId, isAdmin } = await validateToken(token);
 
   if (!valid) return c.json({ error: "Invalid or revoked token" }, 401);
 
+  // If this is the admin token, check if there is a header override
+  let effectiveWorkspaceId = workspaceId;
+  if (isAdmin) {
+    const headerWorkspaceId = c.req.header("x-workspace-id");
+    if (headerWorkspaceId) {
+      effectiveWorkspaceId = headerWorkspaceId;
+    }
+  }
+
   // Attach workspaceId to context for downstream tenant isolation
-  c.set("workspaceId", workspaceId);
+  c.set("workspaceId", effectiveWorkspaceId);
 
   await next();
 };

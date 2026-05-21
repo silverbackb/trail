@@ -118,6 +118,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
   return {
     async getRecentLogs(limit, workspaceId) {
       if (workspaceId) {
+        s(`UPDATE accounts SET workspace_id = ? WHERE workspace_id IS NULL`).run(workspaceId);
         return s<RecentLog>(`
           SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
                  t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
@@ -137,6 +138,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async getAccountsSummary(workspaceId) {
       if (workspaceId) {
+        s(`UPDATE accounts SET workspace_id = ? WHERE workspace_id IS NULL`).run(workspaceId);
         return s<AccountSummary>(`
           SELECT a.account_id, a.name, a.domain,
             COUNT(DISTINCT t.visitor_id) AS visitors,
@@ -186,6 +188,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async listAccounts(workspaceId) {
       if (workspaceId) {
+        s(`UPDATE accounts SET workspace_id = ? WHERE workspace_id IS NULL`).run(workspaceId);
         return s<AccountRow>(`SELECT account_id, name, domain, workspace_id, created_at FROM accounts WHERE workspace_id = ? ORDER BY created_at DESC`).all(workspaceId);
       }
       return s<AccountRow>(`SELECT account_id, name, domain, workspace_id, created_at FROM accounts ORDER BY created_at DESC`).all();
@@ -210,6 +213,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async checkAccountAccess(accountId, workspaceId) {
       if (!workspaceId) return true;
+      s(`UPDATE accounts SET workspace_id = ? WHERE account_id = ? AND workspace_id IS NULL`).run(workspaceId, accountId);
       const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
       return !!row;
     },
@@ -280,6 +284,9 @@ function createPostgresDB(url: string): TrailDB {
   return {
     async getRecentLogs(limit, workspaceId) {
       await init();
+      if (workspaceId) {
+        await sql`UPDATE accounts SET workspace_id = ${workspaceId} WHERE workspace_id IS NULL`;
+      }
       const rows = workspaceId
         ? await sql`
             SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
@@ -300,6 +307,9 @@ function createPostgresDB(url: string): TrailDB {
     },
     async getAccountsSummary(workspaceId) {
       await init();
+      if (workspaceId) {
+        await sql`UPDATE accounts SET workspace_id = ${workspaceId} WHERE workspace_id IS NULL`;
+      }
       const rows = workspaceId
         ? await sql`
             SELECT a.account_id, a.name, a.domain,
@@ -360,6 +370,9 @@ function createPostgresDB(url: string): TrailDB {
     },
     async listAccounts(workspaceId) {
       await init();
+      if (workspaceId) {
+        await sql`UPDATE accounts SET workspace_id = ${workspaceId} WHERE workspace_id IS NULL`;
+      }
       const rows = workspaceId
         ? await sql`SELECT account_id, name, domain, workspace_id, created_at FROM accounts WHERE workspace_id = ${workspaceId} ORDER BY created_at DESC`
         : await sql`SELECT account_id, name, domain, workspace_id, created_at FROM accounts ORDER BY created_at DESC`;
@@ -398,6 +411,7 @@ function createPostgresDB(url: string): TrailDB {
     async checkAccountAccess(accountId, workspaceId) {
       if (!workspaceId) return true;
       await init();
+      await sql`UPDATE accounts SET workspace_id = ${workspaceId} WHERE account_id = ${accountId} AND workspace_id IS NULL`;
       const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
       return rows.length > 0;
     },

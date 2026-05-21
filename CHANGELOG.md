@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.1 — 2026-05-21
+
+### Ajouté
+- **Migration automatique à la volée** : Association automatique des comptes historiques `NULL` au workspace de l'utilisateur dès le premier accès au tableau de bord.
+
+### Corrigé
+- **Logs et synthèses en temps réel** : Prise en compte de l'en-tête `x-workspace-id` lors de la validation d'un jeton d'administration pour permettre au tableau de bord du site web d'afficher les logs en temps réel.
+
+### Modifié
+- **Onboarding simplifié** : Mise à jour de la documentation et du site web pour promouvoir la commande interactive `npx @silverbackbase/trail init`.
+
 ## v0.5.0 — 2026-05-21
 
 ### Ajouté
