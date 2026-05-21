@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.2 — 2026-05-21
+
+### Corrigé
+- **CLI interactif** : Filtrage du paramètre `init` des arguments de processus lors du lancement interactif avec `npx` pour garantir l'exécution de l'assistant interactif (Cloud vs Local) au lieu de basculer silencieusement en mode local.
+
 ## v0.5.1 — 2026-05-21
 
 ### Ajouté

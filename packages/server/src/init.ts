@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(a => a !== "init");
 const tokenIdx = args.indexOf("--token");
 let token = tokenIdx !== -1 ? args[tokenIdx + 1] : args.find(a => a.startsWith("--token="))?.split("=")[1];
 
