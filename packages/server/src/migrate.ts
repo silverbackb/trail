@@ -10,6 +10,7 @@ export async function maybeMigrateSQLiteToPG(dbPath: string, pgUrl: string): Pro
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS accounts (
       account_id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT NOT NULL,
+      workspace_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS visitor_touchpoints (
@@ -46,8 +47,8 @@ export async function maybeMigrateSQLiteToPG(dbPath: string, pgUrl: string): Pro
 
   for (const r of accounts) {
     await sql`
-      INSERT INTO accounts (account_id, name, domain, created_at)
-      VALUES (${r.account_id as string}, ${r.name as string}, ${r.domain as string}, ${r.created_at as string})
+      INSERT INTO accounts (account_id, name, domain, workspace_id, created_at)
+      VALUES (${r.account_id as string}, ${r.name as string}, ${r.domain as string}, ${r.workspace_id as string | null ?? null}, ${r.created_at as string})
       ON CONFLICT DO NOTHING
     `;
   }

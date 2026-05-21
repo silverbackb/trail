@@ -42,8 +42,9 @@ export function createApiRoutes(db: TrailDB) {
   });
 
   app.get("/logs/recent", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
     const limit = Math.min(parseInt(c.req.query("limit") ?? "50"), 100);
-    const rows = await db.getRecentLogs(limit);
+    const rows = await db.getRecentLogs(limit, workspaceId);
     return c.json(rows.map((r) => ({
       ...r,
       created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString(),
@@ -51,7 +52,8 @@ export function createApiRoutes(db: TrailDB) {
   });
 
   app.get("/accounts/summary", requireAuth, async (c) => {
-    const rows = await db.getAccountsSummary();
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const rows = await db.getAccountsSummary(workspaceId);
     return c.json(rows.map((r) => ({
       ...r,
       last_touch: r.last_touch
@@ -101,8 +103,15 @@ export function createApiRoutes(db: TrailDB) {
   });
 
   app.get("/journey/:visitor_id", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
     const visitor_id = c.req.param("visitor_id");
     const account_id = c.req.query("account_id");
+
+    if (account_id) {
+      const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+      if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    }
+
     const rows = await db.getJourneyByVisitor(visitor_id, account_id);
     return c.json({ visitor_id, sessions: rows });
   });

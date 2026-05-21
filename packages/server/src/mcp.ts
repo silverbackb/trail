@@ -10,7 +10,7 @@ function toLocalTime(utc: string): string {
   return new Date(utc + suffix).toLocaleString("fr-FR", { timeZone: tz, hour12: false });
 }
 
-export function buildServer(db: TrailDB): McpServer {
+export function buildServer(db: TrailDB, workspaceId: string | null = null): McpServer {
   const server = new McpServer({ name: "trail", version: "0.1.0" });
 
   server.registerTool("trail_create_account", {
@@ -24,7 +24,7 @@ export function buildServer(db: TrailDB): McpServer {
     const account_id = domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const baseUrl = process.env.TRAIL_URL ?? "http://localhost:3000";
 
-    await db.createAccount(account_id, name, domain);
+    await db.createAccount(account_id, name, domain, workspaceId);
 
     let snippet: string;
     let instructions: string;
@@ -44,7 +44,7 @@ export function buildServer(db: TrailDB): McpServer {
     description: "List all Trail client accounts with their account_id. Use this first to get the account_id needed by all other tools.",
     inputSchema: {},
   }, async () => {
-    const rows = await db.listAccounts();
+    const rows = await db.listAccounts(workspaceId);
     if (!rows.length) return { content: [{ type: "text", text: "No accounts yet." }] };
     const lines = rows.map((r) => `• ${r.name}\n  ID: ${r.account_id}\n  Domain: ${r.domain}\n  Added: ${toLocalTime(r.created_at)}`);
     return { content: [{ type: "text", text: `Trail accounts (${rows.length}):\n\n${lines.join("\n\n")}` }] };
@@ -57,6 +57,9 @@ export function buildServer(db: TrailDB): McpServer {
       limit: z.number().int().min(1).max(50).default(10),
     },
   }, async ({ account_id, limit }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.getRecentSessions(account_id, limit);
     if (!rows.length) return { content: [{ type: "text", text: `No sessions found for account "${account_id}". The tracker is either not installed, not yet triggered, or using a different account_id.` }] };
     const lines = rows.map((r) => {
@@ -76,6 +79,9 @@ export function buildServer(db: TrailDB): McpServer {
       account_id: z.string().describe("Trail account ID"),
     },
   }, async ({ lead_id, account_id }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.getJourneyByLead(lead_id, account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No journey found for lead "${lead_id}" on account "${account_id}". This lead either does not exist or has not submitted a form yet. Use trail_list_leads to see all known leads.` }] };
     const lines = rows.map((r) =>
@@ -91,6 +97,9 @@ export function buildServer(db: TrailDB): McpServer {
       model: z.enum(["first_touch", "last_touch", "linear"]).default("last_touch"),
     },
   }, async ({ account_id, model }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.getChannelReport(account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No attribution data for "${account_id}". No form submissions have been recorded yet. To verify the tracker is working, use trail_get_recent_sessions.` }] };
     const total = rows.reduce((s, r) => s + r.leads, 0);
@@ -108,6 +117,9 @@ export function buildServer(db: TrailDB): McpServer {
       limit: z.number().int().min(1).max(20).default(10),
     },
   }, async ({ account_id, limit }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.getTopPaths(account_id);
     if (!rows.length) return { content: [{ type: "text", text: "No path data found. No form submissions have been recorded yet." }] };
     const freq: Record<string, number> = {};
@@ -122,6 +134,9 @@ export function buildServer(db: TrailDB): McpServer {
     description: "Get a full performance breakdown by channel: total visitors (all sessions), leads (form submissions), and conversion rate. Unlike trail_get_report, this shows ALL visitors including those who never submitted a form. Use this to understand traffic quality per channel.",
     inputSchema: { account_id: z.string().describe("Trail account ID") },
   }, async ({ account_id }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.getChannelPerformance(account_id);
     if (!rows.length) return { content: [{ type: "text", text: `No data for "${account_id}". The tracker has not recorded any sessions yet. Check that the snippet is installed and that the account_id matches exactly.` }] };
     const lines = rows.map((r) => {
@@ -138,6 +153,9 @@ export function buildServer(db: TrailDB): McpServer {
       limit: z.number().int().min(1).max(100).default(20),
     },
   }, async ({ account_id, limit }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
     const rows = await db.listLeads(account_id, limit);
     if (!rows.length) return { content: [{ type: "text", text: `No leads yet for "${account_id}". No visitor has submitted a form on this account's website. The tracker may still be working correctly — use trail_get_recent_sessions to check.` }] };
     const lines = rows.map((r) => `• ${r.lead_id}  |  ${r.ch_type}  |  ${toLocalTime(r.created_at)}`);
@@ -149,8 +167,9 @@ export function buildServer(db: TrailDB): McpServer {
 
 export function createMcpHandler(db: TrailDB) {
   return async (c: Context) => {
+    const workspaceId = c.get("workspaceId") as string | null;
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = buildServer(db);
+    const server = buildServer(db, workspaceId);
     await server.connect(transport);
     return transport.handleRequest(c.req.raw);
   };

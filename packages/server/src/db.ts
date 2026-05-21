@@ -31,7 +31,7 @@ export interface JourneyEntry {
   created_at: string;
 }
 
-export interface AccountRow { account_id: string; name: string; domain: string; created_at: string; }
+export interface AccountRow { account_id: string; name: string; domain: string; workspace_id: string | null; created_at: string; }
 export interface SessionEntry { visitor_id: string; ch_type: string | null; ch_source: string | null; ch_campaign: string | null; landing_url: string | null; lead_id: string | null; created_at: string; }
 export interface TouchpointEntry extends Record<string, unknown> { session_num: number; ch_type: string | null; ch_source: string | null; ch_campaign: string | null; landing_url: string | null; created_at: string; }
 export interface ChannelRow { ch_type: string; leads: number; conversions: number; }
@@ -41,8 +41,8 @@ export interface LeadRow { lead_id: string; ch_type: string; created_at: string;
 
 export interface TrailDB {
   // api.ts
-  getRecentLogs(limit: number): Promise<RecentLog[]>;
-  getAccountsSummary(): Promise<AccountSummary[]>;
+  getRecentLogs(limit: number, workspaceId?: string | null): Promise<RecentLog[]>;
+  getAccountsSummary(workspaceId?: string | null): Promise<AccountSummary[]>;
   sessionExists(visitorId: string, sessionHash: string): Promise<boolean>;
   countVisitorTouchpoints(visitorId: string, accountId: string): Promise<number>;
   insertTouchpoint(data: TouchpointInsert): Promise<void>;
@@ -50,14 +50,15 @@ export interface TrailDB {
   getJourneyByVisitor(visitorId: string, accountId?: string): Promise<JourneyEntry[]>;
   convertVisitor(leadId: string, visitorId: string, accountId: string, timeOnPageSec?: number, scrollDepthPct?: number): Promise<void>;
   // mcp.ts
-  createAccount(accountId: string, name: string, domain: string): Promise<void>;
-  listAccounts(): Promise<AccountRow[]>;
+  createAccount(accountId: string, name: string, domain: string, workspaceId?: string | null): Promise<void>;
+  listAccounts(workspaceId?: string | null): Promise<AccountRow[]>;
   getRecentSessions(accountId: string, limit: number): Promise<SessionEntry[]>;
   getJourneyByLead(leadId: string, accountId: string): Promise<TouchpointEntry[]>;
   getChannelReport(accountId: string): Promise<ChannelRow[]>;
   getTopPaths(accountId: string): Promise<PathRow[]>;
   getChannelPerformance(accountId: string): Promise<PerformanceRow[]>;
   listLeads(accountId: string, limit: number): Promise<LeadRow[]>;
+  checkAccountAccess(accountId: string, workspaceId?: string | null): Promise<boolean>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ const CREATE_TABLES_SQL = `
     account_id  TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     domain      TEXT NOT NULL,
+    workspace_id TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS visitor_touchpoints (
@@ -109,11 +111,22 @@ function createSQLiteDB(dbPath: string): TrailDB {
   sqlite.exec(CREATE_TABLES_SQL);
   try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN time_on_page_sec INTEGER"); } catch {}
   try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN scroll_depth_pct INTEGER"); } catch {}
+  try { sqlite.exec("ALTER TABLE accounts ADD COLUMN workspace_id TEXT"); } catch {}
 
   const s = <T>(sql: string) => sqlite.prepare(sql) as unknown as { all: (...a: unknown[]) => T[]; get: (...a: unknown[]) => T | undefined; run: (...a: unknown[]) => void };
 
   return {
-    async getRecentLogs(limit) {
+    async getRecentLogs(limit, workspaceId) {
+      if (workspaceId) {
+        return s<RecentLog>(`
+          SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
+                 t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
+          FROM visitor_touchpoints t
+          LEFT JOIN accounts a ON a.account_id = t.account_id
+          WHERE a.workspace_id = ?
+          ORDER BY t.created_at DESC LIMIT ?
+        `).all(workspaceId, limit);
+      }
       return s<RecentLog>(`
         SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
                t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
@@ -122,7 +135,19 @@ function createSQLiteDB(dbPath: string): TrailDB {
         ORDER BY t.created_at DESC LIMIT ?
       `).all(limit);
     },
-    async getAccountsSummary() {
+    async getAccountsSummary(workspaceId) {
+      if (workspaceId) {
+        return s<AccountSummary>(`
+          SELECT a.account_id, a.name, a.domain,
+            COUNT(DISTINCT t.visitor_id) AS visitors,
+            COUNT(DISTINCT t.lead_id)   AS leads,
+            MAX(t.created_at)           AS last_touch
+          FROM accounts a
+          LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
+          WHERE a.workspace_id = ?
+          GROUP BY a.account_id ORDER BY last_touch DESC
+        `).all(workspaceId);
+      }
       return s<AccountSummary>(`
         SELECT a.account_id, a.name, a.domain,
           COUNT(DISTINCT t.visitor_id) AS visitors,
@@ -156,11 +181,14 @@ function createSQLiteDB(dbPath: string): TrailDB {
     async convertVisitor(leadId, visitorId, accountId, timeOnPageSec, scrollDepthPct) {
       s(`UPDATE visitor_touchpoints SET lead_id=?, converted=1, time_on_page_sec=COALESCE(?,time_on_page_sec), scroll_depth_pct=COALESCE(?,scroll_depth_pct) WHERE visitor_id=? AND account_id=? AND (lead_id IS NULL OR lead_id=visitor_id)`).run(leadId, timeOnPageSec ?? null, scrollDepthPct ?? null, visitorId, accountId);
     },
-    async createAccount(accountId, name, domain) {
-      s(`INSERT OR IGNORE INTO accounts (account_id, name, domain) VALUES (?, ?, ?)`).run(accountId, name, domain);
+    async createAccount(accountId, name, domain, workspaceId) {
+      s(`INSERT OR IGNORE INTO accounts (account_id, name, domain, workspace_id) VALUES (?, ?, ?, ?)`).run(accountId, name, domain, workspaceId ?? null);
     },
-    async listAccounts() {
-      return s<AccountRow>(`SELECT account_id, name, domain, created_at FROM accounts ORDER BY created_at DESC`).all();
+    async listAccounts(workspaceId) {
+      if (workspaceId) {
+        return s<AccountRow>(`SELECT account_id, name, domain, workspace_id, created_at FROM accounts WHERE workspace_id = ? ORDER BY created_at DESC`).all(workspaceId);
+      }
+      return s<AccountRow>(`SELECT account_id, name, domain, workspace_id, created_at FROM accounts ORDER BY created_at DESC`).all();
     },
     async getRecentSessions(accountId, limit) {
       return s<SessionEntry>(`SELECT visitor_id, ch_type, ch_source, ch_campaign, landing_url, lead_id, created_at FROM visitor_touchpoints WHERE account_id=? ORDER BY created_at DESC LIMIT ?`).all(accountId, limit);
@@ -180,6 +208,11 @@ function createSQLiteDB(dbPath: string): TrailDB {
     async listLeads(accountId, limit) {
       return s<LeadRow>(`SELECT lead_id, ch_type, created_at FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL GROUP BY lead_id ORDER BY MAX(created_at) DESC LIMIT ?`).all(accountId, limit);
     },
+    async checkAccountAccess(accountId, workspaceId) {
+      if (!workspaceId) return true;
+      const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
+      return !!row;
+    },
   };
 }
 
@@ -190,6 +223,7 @@ const CREATE_TABLES_PG = `
     account_id  TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     domain      TEXT NOT NULL,
+    workspace_id TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE TABLE IF NOT EXISTS visitor_touchpoints (
@@ -239,32 +273,53 @@ function createPostgresDB(url: string): TrailDB {
     await sql.unsafe(CREATE_TABLES_PG);
     await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS time_on_page_sec INTEGER");
     await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS scroll_depth_pct INTEGER");
+    await sql.unsafe("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS workspace_id TEXT");
     initialized = true;
   }
 
   return {
-    async getRecentLogs(limit) {
+    async getRecentLogs(limit, workspaceId) {
       await init();
-      const rows = await sql`
-        SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
-               t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
-        FROM visitor_touchpoints t
-        LEFT JOIN accounts a ON a.account_id = t.account_id
-        ORDER BY t.created_at DESC LIMIT ${limit}
-      `;
+      const rows = workspaceId
+        ? await sql`
+            SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
+                   t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
+            FROM visitor_touchpoints t
+            LEFT JOIN accounts a ON a.account_id = t.account_id
+            WHERE a.workspace_id = ${workspaceId}
+            ORDER BY t.created_at DESC LIMIT ${limit}
+          `
+        : await sql`
+            SELECT t.id, t.account_id, t.visitor_id, t.ch_type, t.ch_source, t.ch_campaign,
+                   t.landing_url, t.lead_id, t.converted, t.hostname, t.created_at, a.domain
+            FROM visitor_touchpoints t
+            LEFT JOIN accounts a ON a.account_id = t.account_id
+            ORDER BY t.created_at DESC LIMIT ${limit}
+          `;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as RecentLog[];
     },
-    async getAccountsSummary() {
+    async getAccountsSummary(workspaceId) {
       await init();
-      const rows = await sql`
-        SELECT a.account_id, a.name, a.domain,
-          COUNT(DISTINCT t.visitor_id)::int AS visitors,
-          COUNT(DISTINCT t.lead_id)::int    AS leads,
-          MAX(t.created_at)                 AS last_touch
-        FROM accounts a
-        LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
-        GROUP BY a.account_id ORDER BY last_touch DESC
-      `;
+      const rows = workspaceId
+        ? await sql`
+            SELECT a.account_id, a.name, a.domain,
+              COUNT(DISTINCT t.visitor_id)::int AS visitors,
+              COUNT(DISTINCT t.lead_id)::int    AS leads,
+              MAX(t.created_at)                 AS last_touch
+            FROM accounts a
+            LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
+            WHERE a.workspace_id = ${workspaceId}
+            GROUP BY a.account_id ORDER BY last_touch DESC
+          `
+        : await sql`
+            SELECT a.account_id, a.name, a.domain,
+              COUNT(DISTINCT t.visitor_id)::int AS visitors,
+              COUNT(DISTINCT t.lead_id)::int    AS leads,
+              MAX(t.created_at)                 AS last_touch
+            FROM accounts a
+            LEFT JOIN visitor_touchpoints t ON t.account_id = a.account_id
+            GROUP BY a.account_id ORDER BY last_touch DESC
+          `;
       return rows.map(r => ({ ...r, last_touch: r.last_touch ? toISO(r.last_touch) : null })) as AccountSummary[];
     },
     async sessionExists(visitorId, sessionHash) {
@@ -299,13 +354,15 @@ function createPostgresDB(url: string): TrailDB {
       await init();
       await sql`UPDATE visitor_touchpoints SET lead_id=${leadId}, converted=1, time_on_page_sec=COALESCE(${timeOnPageSec ?? null},time_on_page_sec), scroll_depth_pct=COALESCE(${scrollDepthPct ?? null},scroll_depth_pct) WHERE visitor_id=${visitorId} AND account_id=${accountId} AND (lead_id IS NULL OR lead_id=visitor_id)`;
     },
-    async createAccount(accountId, name, domain) {
+    async createAccount(accountId, name, domain, workspaceId) {
       await init();
-      await sql`INSERT INTO accounts (account_id, name, domain) VALUES (${accountId},${name},${domain}) ON CONFLICT DO NOTHING`;
+      await sql`INSERT INTO accounts (account_id, name, domain, workspace_id) VALUES (${accountId},${name},${domain},${workspaceId ?? null}) ON CONFLICT DO NOTHING`;
     },
-    async listAccounts() {
+    async listAccounts(workspaceId) {
       await init();
-      const rows = await sql`SELECT account_id, name, domain, created_at FROM accounts ORDER BY created_at DESC`;
+      const rows = workspaceId
+        ? await sql`SELECT account_id, name, domain, workspace_id, created_at FROM accounts WHERE workspace_id = ${workspaceId} ORDER BY created_at DESC`
+        : await sql`SELECT account_id, name, domain, workspace_id, created_at FROM accounts ORDER BY created_at DESC`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as AccountRow[];
     },
     async getRecentSessions(accountId, limit) {
@@ -337,6 +394,12 @@ function createPostgresDB(url: string): TrailDB {
       await init();
       const rows = await sql`SELECT lead_id, ch_type, MAX(created_at) as created_at FROM visitor_touchpoints WHERE account_id=${accountId} AND lead_id IS NOT NULL GROUP BY lead_id, ch_type ORDER BY MAX(created_at) DESC LIMIT ${limit}`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as LeadRow[];
+    },
+    async checkAccountAccess(accountId, workspaceId) {
+      if (!workspaceId) return true;
+      await init();
+      const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
+      return rows.length > 0;
     },
   };
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0 — 2026-05-21
+
+### Ajouté
+- **Cinématique d'installation interactive** — initialisation interactive via `npx @silverbackbase/trail init` pour choisir entre Cloud managé et Local open-source.
+- **Isolation multi-tenant stricte** — association des clés API avec le `workspaceId` de l'utilisateur pour cloisonner hermétiquement les données au sein de la base de données (SQLite et PostgreSQL).
+- **Parité de schéma dynamique** — migration automatique et progressive des bases SQLite et Postgres avec `workspace_id` sur les comptes existants.
+
 ## v0.4.3 — 2026-05-20
 
 ### Corrigé
