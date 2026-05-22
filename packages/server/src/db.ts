@@ -60,6 +60,9 @@ export interface TrailDB {
   listLeads(accountId: string, limit: number): Promise<LeadRow[]>;
   checkAccountAccess(accountId: string, workspaceId?: string | null): Promise<boolean>;
   deleteAccount(accountId: string, workspaceId?: string | null, force?: boolean): Promise<{ deleted: boolean; reason?: string; visitors: number; leads: number }>;
+  deleteVisitor(accountId: string, visitorId: string, workspaceId?: string | null): Promise<{ deleted: boolean; reason?: string; touchpoints_removed: number }>;
+  deleteLead(accountId: string, leadId: string, workspaceId?: string | null): Promise<{ deleted: boolean; reason?: string; touchpoints_updated: number }>;
+  purgeAccountData(accountId: string, workspaceId?: string | null): Promise<{ purged: boolean; reason?: string; visitors_removed: number; leads_removed: number }>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -232,6 +235,36 @@ function createSQLiteDB(dbPath: string): TrailDB {
       s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
       s(`DELETE FROM accounts WHERE account_id=?`).run(accountId);
       return { deleted: true, visitors, leads };
+    },
+    async deleteVisitor(accountId, visitorId, workspaceId) {
+      if (workspaceId) {
+        const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
+        if (!row) return { deleted: false, reason: "not_found", touchpoints_removed: 0 };
+      }
+      const n = s<{ n: number }>(`SELECT COUNT(*) as n FROM visitor_touchpoints WHERE account_id=? AND visitor_id=?`).get(accountId, visitorId)?.n ?? 0;
+      s(`DELETE FROM visitor_sessions WHERE account_id=? AND visitor_id=?`).run(accountId, visitorId);
+      s(`DELETE FROM visitor_touchpoints WHERE account_id=? AND visitor_id=?`).run(accountId, visitorId);
+      return { deleted: true, touchpoints_removed: n };
+    },
+    async deleteLead(accountId, leadId, workspaceId) {
+      if (workspaceId) {
+        const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
+        if (!row) return { deleted: false, reason: "not_found", touchpoints_updated: 0 };
+      }
+      const n = s<{ n: number }>(`SELECT COUNT(*) as n FROM visitor_touchpoints WHERE account_id=? AND lead_id=?`).get(accountId, leadId)?.n ?? 0;
+      s(`UPDATE visitor_touchpoints SET lead_id=NULL, converted=0 WHERE account_id=? AND lead_id=?`).run(accountId, leadId);
+      return { deleted: true, touchpoints_updated: n };
+    },
+    async purgeAccountData(accountId, workspaceId) {
+      if (workspaceId) {
+        const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
+        if (!row) return { purged: false, reason: "not_found", visitors_removed: 0, leads_removed: 0 };
+      }
+      const visitors = s<{ n: number }>(`SELECT COUNT(DISTINCT visitor_id) as n FROM visitor_touchpoints WHERE account_id=?`).get(accountId)?.n ?? 0;
+      const leads = s<{ n: number }>(`SELECT COUNT(DISTINCT lead_id) as n FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL`).get(accountId)?.n ?? 0;
+      s(`DELETE FROM visitor_sessions WHERE account_id=?`).run(accountId);
+      s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
+      return { purged: true, visitors_removed: visitors, leads_removed: leads };
     },
   };
 }
@@ -448,6 +481,43 @@ function createPostgresDB(url: string): TrailDB {
       await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
       await sql`DELETE FROM accounts WHERE account_id=${accountId}`;
       return { deleted: true, visitors, leads };
+    },
+    async deleteVisitor(accountId, visitorId, workspaceId) {
+      await init();
+      if (workspaceId) {
+        const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
+        if (!rows.length) return { deleted: false, reason: "not_found", touchpoints_removed: 0 };
+      }
+      const [cnt] = await sql`SELECT COUNT(*)::int as n FROM visitor_touchpoints WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
+      const n = (cnt as { n: number }).n ?? 0;
+      await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
+      await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
+      return { deleted: true, touchpoints_removed: n };
+    },
+    async deleteLead(accountId, leadId, workspaceId) {
+      await init();
+      if (workspaceId) {
+        const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
+        if (!rows.length) return { deleted: false, reason: "not_found", touchpoints_updated: 0 };
+      }
+      const [cnt] = await sql`SELECT COUNT(*)::int as n FROM visitor_touchpoints WHERE account_id=${accountId} AND lead_id=${leadId}`;
+      const n = (cnt as { n: number }).n ?? 0;
+      await sql`UPDATE visitor_touchpoints SET lead_id=NULL, converted=0 WHERE account_id=${accountId} AND lead_id=${leadId}`;
+      return { deleted: true, touchpoints_updated: n };
+    },
+    async purgeAccountData(accountId, workspaceId) {
+      await init();
+      if (workspaceId) {
+        const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
+        if (!rows.length) return { purged: false, reason: "not_found", visitors_removed: 0, leads_removed: 0 };
+      }
+      const [vcnt] = await sql`SELECT COUNT(DISTINCT visitor_id)::int as n FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      const [lcnt] = await sql`SELECT COUNT(DISTINCT lead_id)::int as n FROM visitor_touchpoints WHERE account_id=${accountId} AND lead_id IS NOT NULL`;
+      const visitors_removed = (vcnt as { n: number }).n ?? 0;
+      const leads_removed = (lcnt as { n: number }).n ?? 0;
+      await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId}`;
+      await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      return { purged: true, visitors_removed, leads_removed };
     },
   };
 }

@@ -137,6 +137,32 @@ export function createApiRoutes(db: TrailDB) {
     return c.json({ lead_id, account_id, touchpoints: rows.map((r) => ({ ...r, created_at: new Date(String(r.created_at) + (String(r.created_at).includes("T") ? "" : "Z")).toISOString() })) });
   });
 
+  app.delete("/accounts/:account_id/visitors/:visitor_id", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const visitor_id = c.req.param("visitor_id");
+    const result = await db.deleteVisitor(account_id, visitor_id, workspaceId);
+    if (!result.deleted) return c.json({ error: "Account not found" }, 404);
+    return c.json({ ok: true, visitor_id, touchpoints_removed: result.touchpoints_removed });
+  });
+
+  app.delete("/accounts/:account_id/leads/:lead_id", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const lead_id = c.req.param("lead_id");
+    const result = await db.deleteLead(account_id, lead_id, workspaceId);
+    if (!result.deleted) return c.json({ error: "Account not found" }, 404);
+    return c.json({ ok: true, lead_id, touchpoints_updated: result.touchpoints_updated });
+  });
+
+  app.delete("/accounts/:account_id/data", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const result = await db.purgeAccountData(account_id, workspaceId);
+    if (!result.purged) return c.json({ error: "Account not found" }, 404);
+    return c.json({ ok: true, account_id, visitors_removed: result.visitors_removed, leads_removed: result.leads_removed });
+  });
+
   // ── Legacy dashboard endpoints ───────────────────────────────────────────────
 
   app.get("/logs/recent", requireAuth, async (c) => {
