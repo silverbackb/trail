@@ -41,6 +41,92 @@ export function createApiRoutes(db: TrailDB) {
     });
   });
 
+  // ── REST endpoints for silverbackbase-mcp ──────────────────────────────────
+
+  app.post("/accounts", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const body = await c.req.json().catch(() => null);
+    const parsed = z.object({
+      name: z.string().min(1),
+      domain: z.string().min(1),
+    }).safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid" }, 400);
+    const { name, domain } = parsed.data;
+    const account_id = domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    await db.createAccount(account_id, name, domain, workspaceId);
+    return c.json({ account_id, name, domain });
+  });
+
+  app.get("/accounts", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const rows = await db.listAccounts(workspaceId);
+    return c.json(rows.map((r) => ({ ...r, created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString() })));
+  });
+
+  app.get("/accounts/:account_id/sessions", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "10"), 50);
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getRecentSessions(account_id, limit);
+    return c.json(rows.map((r) => ({ ...r, created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString() })));
+  });
+
+  app.get("/accounts/:account_id/report", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getChannelReport(account_id);
+    return c.json(rows);
+  });
+
+  app.get("/accounts/:account_id/paths", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "10"), 20);
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getTopPaths(account_id);
+    const freq: Record<string, number> = {};
+    for (const r of rows) freq[r.path] = (freq[r.path] ?? 0) + 1;
+    const paths = Object.entries(freq).sort(([, a], [, b]) => b - a).slice(0, limit).map(([path, count]) => ({ path, count }));
+    return c.json(paths);
+  });
+
+  app.get("/accounts/:account_id/performance", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getChannelPerformance(account_id);
+    return c.json(rows);
+  });
+
+  app.get("/accounts/:account_id/leads", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "20"), 100);
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.listLeads(account_id, limit);
+    return c.json(rows.map((r) => ({ ...r, created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString() })));
+  });
+
+  app.get("/leads/:lead_id/journey", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const lead_id = c.req.param("lead_id");
+    const account_id = c.req.query("account_id");
+    if (!account_id) return c.json({ error: "account_id query param required" }, 400);
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getJourneyByLead(lead_id, account_id);
+    return c.json({ lead_id, account_id, touchpoints: rows.map((r) => ({ ...r, created_at: new Date(String(r.created_at) + (String(r.created_at).includes("T") ? "" : "Z")).toISOString() })) });
+  });
+
+  // ── Legacy dashboard endpoints ───────────────────────────────────────────────
+
   app.get("/logs/recent", requireAuth, async (c) => {
     const workspaceId = (c.get as any)("workspaceId") as string | null;
     const limit = Math.min(parseInt(c.req.query("limit") ?? "50"), 100);

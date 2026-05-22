@@ -6,6 +6,7 @@ const VALIDATE_URL = process.env.SILVERBACKBASE_URL
   : null;
 
 const TRAIL_SECRET = process.env.TRAIL_VALIDATE_SECRET ?? "";
+const INTERNAL_SECRET = process.env.TRAIL_INTERNAL_SECRET ?? "";
 
 type CacheEntry = { valid: boolean; workspaceId: string | null; expires: number; isAdmin?: boolean };
 const cache = new Map<string, CacheEntry>();
@@ -42,6 +43,16 @@ async function validateToken(token: string): Promise<{ valid: boolean; workspace
 }
 
 export const requireAuth: MiddlewareHandler = async (c, next) => {
+  // Fast-path: internal service-to-service call from silverbackbase-mcp
+  if (INTERNAL_SECRET) {
+    const internalSecret = c.req.header("x-internal-secret");
+    if (internalSecret === INTERNAL_SECRET) {
+      c.set("workspaceId", c.req.header("x-workspace-id") ?? null);
+      await next();
+      return;
+    }
+  }
+
   const auth = c.req.header("authorization");
   if (!auth?.startsWith("Bearer ")) {
     return c.json({ error: "Unauthorized — provide Authorization: Bearer <token>" }, 401);
