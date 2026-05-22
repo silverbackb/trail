@@ -63,6 +63,18 @@ export function createApiRoutes(db: TrailDB) {
     return c.json(rows.map((r) => ({ ...r, created_at: new Date(r.created_at + (r.created_at.includes("T") ? "" : "Z")).toISOString() })));
   });
 
+  app.delete("/accounts/:account_id", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const force = c.req.query("force") === "true";
+    const result = await db.deleteAccount(account_id, workspaceId, force);
+    if (!result.deleted) {
+      if (result.reason === "not_found") return c.json({ error: "Account not found" }, 404);
+      return c.json({ error: "Account has data", visitors: result.visitors, leads: result.leads, hint: "Pass force=true to delete all data" }, 409);
+    }
+    return c.json({ ok: true, deleted: account_id, visitors_purged: result.visitors, leads_purged: result.leads });
+  });
+
   app.get("/accounts/:account_id/sessions", requireAuth, async (c) => {
     const workspaceId = (c.get as any)("workspaceId") as string | null;
     const account_id = c.req.param("account_id");

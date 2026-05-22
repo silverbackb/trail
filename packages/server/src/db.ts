@@ -59,6 +59,7 @@ export interface TrailDB {
   getChannelPerformance(accountId: string): Promise<PerformanceRow[]>;
   listLeads(accountId: string, limit: number): Promise<LeadRow[]>;
   checkAccountAccess(accountId: string, workspaceId?: string | null): Promise<boolean>;
+  deleteAccount(accountId: string, workspaceId?: string | null, force?: boolean): Promise<{ deleted: boolean; reason?: string; visitors: number; leads: number }>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -216,6 +217,21 @@ function createSQLiteDB(dbPath: string): TrailDB {
       s(`UPDATE accounts SET workspace_id = ? WHERE account_id = ? AND workspace_id IS NULL`).run(workspaceId, accountId);
       const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
       return !!row;
+    },
+    async deleteAccount(accountId, workspaceId, force = false) {
+      if (workspaceId) {
+        const row = s<{ 1: number }>(`SELECT 1 FROM accounts WHERE account_id = ? AND workspace_id = ?`).get(accountId, workspaceId);
+        if (!row) return { deleted: false, reason: "not_found", visitors: 0, leads: 0 };
+      }
+      const visitors = s<{ n: number }>(`SELECT COUNT(DISTINCT visitor_id) as n FROM visitor_touchpoints WHERE account_id=?`).get(accountId)?.n ?? 0;
+      const leads = s<{ n: number }>(`SELECT COUNT(DISTINCT lead_id) as n FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL`).get(accountId)?.n ?? 0;
+      if (!force && (visitors > 0 || leads > 0)) {
+        return { deleted: false, reason: "has_data", visitors, leads };
+      }
+      s(`DELETE FROM visitor_sessions WHERE account_id=?`).run(accountId);
+      s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
+      s(`DELETE FROM accounts WHERE account_id=?`).run(accountId);
+      return { deleted: true, visitors, leads };
     },
   };
 }
@@ -414,6 +430,24 @@ function createPostgresDB(url: string): TrailDB {
       await sql`UPDATE accounts SET workspace_id = ${workspaceId} WHERE account_id = ${accountId} AND workspace_id IS NULL`;
       const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
       return rows.length > 0;
+    },
+    async deleteAccount(accountId, workspaceId, force = false) {
+      await init();
+      if (workspaceId) {
+        const rows = await sql`SELECT 1 FROM accounts WHERE account_id = ${accountId} AND workspace_id = ${workspaceId}`;
+        if (!rows.length) return { deleted: false, reason: "not_found", visitors: 0, leads: 0 };
+      }
+      const [vcnt] = await sql`SELECT COUNT(DISTINCT visitor_id)::int as n FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      const [lcnt] = await sql`SELECT COUNT(DISTINCT lead_id)::int as n FROM visitor_touchpoints WHERE account_id=${accountId} AND lead_id IS NOT NULL`;
+      const visitors = (vcnt as { n: number }).n ?? 0;
+      const leads = (lcnt as { n: number }).n ?? 0;
+      if (!force && (visitors > 0 || leads > 0)) {
+        return { deleted: false, reason: "has_data", visitors, leads };
+      }
+      await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId}`;
+      await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      await sql`DELETE FROM accounts WHERE account_id=${accountId}`;
+      return { deleted: true, visitors, leads };
     },
   };
 }
