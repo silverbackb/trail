@@ -23,6 +23,23 @@ if (process.argv.slice(2).includes("init")) {
   const app = new Hono();
 
   app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
+
+  // Structured request logging — propagate x-trace-id from MCP gateway
+  app.use("*", async (c, next) => {
+    const start = Date.now();
+    const traceId = c.req.header("x-trace-id") ?? "local";
+    await next();
+    process.stdout.write(JSON.stringify({
+      service: "trail",
+      trace_id: traceId,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      status: c.res.status,
+      duration_ms: Date.now() - start,
+      timestamp: new Date().toISOString(),
+    }) + "\n");
+  });
+
   app.route("/", createApiRoutes(db));
   app.all("/mcp", requireAuth, createMcpHandler(db));
 
