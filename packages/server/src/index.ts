@@ -1,16 +1,15 @@
 #!/usr/bin/env node
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { createDB } from "./db.js";
-import { createApiRoutes } from "./api.js";
-import { createMcpHandler } from "./mcp.js";
-import { requireAuth } from "./auth.js";
-import { maybeMigrateSQLiteToPG } from "./migrate.js";
-
 if (process.argv.slice(2).includes("init")) {
   await import("./init.js");
 } else {
+  const { serve } = await import("@hono/node-server");
+  const { Hono } = await import("hono");
+  const { cors } = await import("hono/cors");
+  const { createDB } = await import("./db.js");
+  const { createApiRoutes } = await import("./api.js");
+  const { createMcpHandler } = await import("./mcp.js");
+  const { requireAuth } = await import("./auth.js");
+  const { maybeMigrateSQLiteToPG } = await import("./migrate.js");
   const port = parseInt(process.env.PORT ?? "3000");
   const dbPath = process.env.DB_PATH ?? "./trail.db";
   const pgUrl = process.env.DATABASE_URL;
@@ -50,4 +49,16 @@ if (process.argv.slice(2).includes("init")) {
     console.log(`  Tracker→ ${base}/t.js`);
     console.log(`  DB     → ${dbPath}`);
   });
+
+  const retentionDays = parseInt(process.env.TRAIL_RETENTION_DAYS ?? "365");
+  const runPurge = async () => {
+    try {
+      const { removed } = await db.purgeOldTouchpoints(retentionDays);
+      if (removed > 0) console.log(JSON.stringify({ service: "trail", event: "purge", removed, retention_days: retentionDays, timestamp: new Date().toISOString() }));
+    } catch (e) {
+      console.error("[purge] failed:", e);
+    }
+  };
+  await runPurge();
+  setInterval(runPurge, 24 * 60 * 60 * 1000);
 }

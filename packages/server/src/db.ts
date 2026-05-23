@@ -40,6 +40,8 @@ export interface PerformanceRow { ch_type: string; visitors: number; leads: numb
 export interface LeadRow { lead_id: string; ch_type: string; created_at: string; }
 
 export interface TrailDB {
+  // maintenance
+  purgeOldTouchpoints(olderThanDays: number): Promise<{ removed: number }>;
   // api.ts
   getRecentLogs(limit: number, workspaceId?: string | null): Promise<RecentLog[]>;
   getAccountsSummary(workspaceId?: string | null): Promise<AccountSummary[]>;
@@ -265,6 +267,13 @@ function createSQLiteDB(dbPath: string): TrailDB {
       s(`DELETE FROM visitor_sessions WHERE account_id=?`).run(accountId);
       s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
       return { purged: true, visitors_removed: visitors, leads_removed: leads };
+    },
+    async purgeOldTouchpoints(olderThanDays) {
+      const cutoff = new Date(Date.now() - olderThanDays * 86400_000).toISOString();
+      const before = s<{ n: number }>(`SELECT COUNT(*) as n FROM visitor_touchpoints WHERE created_at < ?`).get(cutoff)?.n ?? 0;
+      s(`DELETE FROM visitor_sessions WHERE visitor_id IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at < ?) AND visitor_id NOT IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at >= ?)`).run(cutoff, cutoff);
+      s(`DELETE FROM visitor_touchpoints WHERE created_at < ?`).run(cutoff);
+      return { removed: before };
     },
   };
 }
@@ -518,6 +527,18 @@ function createPostgresDB(url: string): TrailDB {
       await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId}`;
       await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
       return { purged: true, visitors_removed, leads_removed };
+    },
+    async purgeOldTouchpoints(olderThanDays) {
+      await init();
+      const cutoff = new Date(Date.now() - olderThanDays * 86400_000);
+      await sql`
+        DELETE FROM visitor_sessions
+        WHERE visitor_id IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at < ${cutoff})
+        AND visitor_id NOT IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at >= ${cutoff})
+      `;
+      const [row] = await sql`SELECT COUNT(*)::int as n FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
+      await sql`DELETE FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
+      return { removed: (row as { n: number }).n ?? 0 };
     },
   };
 }
