@@ -144,19 +144,14 @@ The MCP server connects to the same SQLite database as your local Trail server.
 
 ### Cloud (HTTP)
 
-**Installation automatique** — détecte et configure Claude Code, Claude Desktop, Antigravity et Codex CLI :
-```bash
-npx @silverbackbase/trail init --token <your-token>
-```
-Get your token at [silverbackbase.com/account/tokens](https://silverbackbase.com/account/tokens).
+Point your MCP client to your Trail instance:
 
-**Manuel — Claude Code / Claude Desktop** (`~/.claude.json` or `claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "trail": {
       "type": "http",
-      "url": "https://trail.yoursite.com/mcp",
+      "url": "https://your-trail-instance.com/mcp",
       "headers": {
         "Authorization": "Bearer <your-token>"
       }
@@ -164,6 +159,8 @@ Get your token at [silverbackbase.com/account/tokens](https://silverbackbase.com
   }
 }
 ```
+
+Using the hosted version? → [silverbackbase.com](https://www.silverbackbase.com)
 
 Available tools:
 
