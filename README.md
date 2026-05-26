@@ -154,9 +154,9 @@ Get your token at [silverbackbase.com/account/tokens](https://silverbackbase.com
 ```json
 {
   "mcpServers": {
-    "silverbackbase": {
+    "trail": {
       "type": "http",
-      "url": "https://mcp.silverbackbase.com/mcp",
+      "url": "https://trail.yoursite.com/mcp",
       "headers": {
         "Authorization": "Bearer <your-token>"
       }
