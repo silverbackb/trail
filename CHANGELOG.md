@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.6 — 2026-05-26
+
+### Corrigé
+- `SKILL_NAME` corrigé de `"trail-attribution"` → `"trail-attribution-sbb"` — le skill s'installe maintenant dans le bon dossier
+
+---
+
 ## v0.7.5 — 2026-05-24
 
 ### Modifié

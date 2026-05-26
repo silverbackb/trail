@@ -12,7 +12,7 @@ const tokenIdx = args.indexOf("--token");
 let cliToken: string | undefined = tokenIdx !== -1 ? args[tokenIdx + 1] : args.find(a => a.startsWith("--token="))?.split("=")[1];
 
 const UNIFIED_MCP_URL = "https://mcp.silverbackbase.com/mcp";
-const SKILL_NAME = "trail-attribution";
+const SKILL_NAME = "trail-attribution-sbb";
 
 function configHasUnifiedMcp(configPath: string): boolean {
   if (!existsSync(configPath)) return false;
