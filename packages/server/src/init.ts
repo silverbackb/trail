@@ -128,18 +128,13 @@ async function main() {
     : join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
 
   const mcpClients = [
-    { name: "Claude Code",    path: join(home, ".claude.json"),                                    format: "json" as const },
-    { name: "Claude Desktop", path: claudeDesktopPath,                                             format: "json" as const },
-    { name: "Antigravity",    path: join(home, ".gemini", "antigravity", "mcp_config.json"),       format: "json" as const },
-    { name: "Codex CLI",      path: join(home, ".codex", "config.toml"),                           format: "toml" as const },
+    { name: "Claude Code",    path: join(home, ".claude.json"),   format: "json" as const },
+    { name: "Claude Desktop", path: claudeDesktopPath,            format: "json" as const },
   ];
 
-  const hasMcp = (c: typeof mcpClients[number]) =>
-    c.format === "toml" ? configHasUnifiedMcpToml(c.path) : configHasUnifiedMcp(c.path);
-  const extractToken = (c: typeof mcpClients[number]) =>
-    c.format === "toml" ? extractTokenFromConfigToml(c.path) : extractTokenFromConfig(c.path);
-  const writeMcp = (c: typeof mcpClients[number], t: string) =>
-    c.format === "toml" ? upsertMcpToml(c.path, t) : upsertMcp(c.path, t);
+  const hasMcp     = (c: typeof mcpClients[number]) => configHasUnifiedMcp(c.path);
+  const extractToken = (c: typeof mcpClients[number]) => extractTokenFromConfig(c.path);
+  const writeMcp   = (c: typeof mcpClients[number], t: string) => upsertMcp(c.path, t);
 
   const rl = createInterface({ input, output });
   console.log(`\n  🦍 SilverBackBase — Trail\n`);
@@ -194,13 +189,10 @@ async function main() {
   // Install skill in all detected agent clients
   const skillTargets = [
     { name: "Claude Code", dir: join(home, ".claude", "skills") },
-    { name: "Codex CLI",   dir: join(home, ".agents", "skills"),                        detectedBy: join(home, ".codex", "config.toml") },
-    { name: "Antigravity", dir: join(home, ".gemini", "antigravity", "skills"),         detectedBy: join(home, ".gemini", "antigravity", "mcp_config.json") },
   ];
 
   const skillInstalled: string[] = [];
   for (const target of skillTargets) {
-    if (target.detectedBy && !existsSync(target.detectedBy)) continue;
     if (installSkill(target.dir)) skillInstalled.push(target.name);
   }
 
