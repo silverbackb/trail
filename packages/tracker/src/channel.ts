@@ -7,6 +7,8 @@ export interface Channel {
   utm_term: string | null;
   utm_content: string | null;
   gclid: string | null;
+  gbraid: string | null;
+  wbraid: string | null;
   fbclid: string | null;
   li_fat_id: string | null;
   ttclid: string | null;
@@ -19,19 +21,16 @@ const SEARCH_ENGINES = ["google", "bing", "yahoo", "duckduckgo", "yandex", "baid
 const SOCIAL_NETWORKS = ["facebook", "instagram", "twitter", "x.com", "linkedin", "tiktok", "youtube", "pinterest"];
 
 function classifyReferrer(referrer: string, params: URLSearchParams): ChannelType {
-  const gclid = params.get("gclid");
-  const fbclid = params.get("fbclid");
-  const li_fat_id = params.get("li_fat_id");
-  const ttclid = params.get("ttclid");
-
-  // Click IDs take priority over utm_source — gclid means paid Google Ads regardless of utm_source value
-  if (gclid) return "google_ads";
-  if (fbclid) return "facebook_ads";
-  if (li_fat_id) return "linkedin_ads";
-  if (ttclid) return "tiktok_ads";
+  // Google Ads click IDs take priority over everything, including utm_source
+  if (params.get("gclid") || params.get("gbraid") || params.get("wbraid") || params.get("gad_campaignid")) return "google_ads";
 
   const source = params.get("utm_source");
   if (source) return source;
+
+  // Other ad network click IDs are fallback when no utm_source
+  if (params.get("fbclid")) return "facebook_ads";
+  if (params.get("li_fat_id")) return "linkedin_ads";
+  if (params.get("ttclid")) return "tiktok_ads";
 
   if (!referrer) return "direct";
 
@@ -76,8 +75,9 @@ export function captureChannel(): Channel {
   const params = new URLSearchParams(location.search);
   const referrer = document.referrer;
   const hasSignal = !!(
-    params.get("utm_source") || params.get("gclid") || params.get("fbclid") ||
-    params.get("li_fat_id") || params.get("ttclid")
+    params.get("utm_source") || params.get("gclid") || params.get("gbraid") ||
+    params.get("wbraid") || params.get("gad_campaignid") ||
+    params.get("fbclid") || params.get("li_fat_id") || params.get("ttclid")
   );
 
   if (hasSignal) {
@@ -88,6 +88,8 @@ export function captureChannel(): Channel {
       utm_term: params.get("utm_term"),
       utm_content: params.get("utm_content"),
       gclid: params.get("gclid"),
+      gbraid: params.get("gbraid"),
+      wbraid: params.get("wbraid"),
       fbclid: params.get("fbclid"),
       li_fat_id: params.get("li_fat_id"),
       ttclid: params.get("ttclid"),
@@ -110,6 +112,8 @@ export function captureChannel(): Channel {
     utm_term: null,
     utm_content: null,
     gclid: null,
+    gbraid: null,
+    wbraid: null,
     fbclid: null,
     li_fat_id: null,
     ttclid: null,

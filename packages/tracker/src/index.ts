@@ -17,7 +17,7 @@ window.addEventListener("scroll", () => {
 
 function hasCampaignSignal(): boolean {
   const p = new URLSearchParams(location.search);
-  return !!(p.get("utm_source") || p.get("gclid") || p.get("fbclid") || p.get("li_fat_id") || p.get("ttclid"));
+  return !!(p.get("utm_source") || p.get("gclid") || p.get("gbraid") || p.get("wbraid") || p.get("gad_campaignid") || p.get("fbclid") || p.get("li_fat_id") || p.get("ttclid"));
 }
 
 function trackSession(): void {

@@ -18,14 +18,14 @@ export interface AccountSummary {
 export interface TouchpointInsert {
   id: string; visitor_id: string; account_id: string; session_num: number;
   ch_source: string | null; ch_medium: string | null; ch_campaign: string | null;
-  ch_term: string | null; ch_type: string; gclid: string | null; fbclid: string | null;
+  ch_term: string | null; ch_type: string; gclid: string | null; gbraid: string | null; wbraid: string | null; fbclid: string | null;
   landing_url: string | null; referrer: string | null; hostname: string | null;
 }
 
 export interface JourneyEntry {
   session_num: number; ch_type: string | null; ch_source: string | null;
   ch_medium: string | null; ch_campaign: string | null; ch_term: string | null;
-  gclid: string | null; fbclid: string | null; landing_url: string | null;
+  gclid: string | null; gbraid: string | null; wbraid: string | null; fbclid: string | null; landing_url: string | null;
   referrer: string | null; hostname: string | null;
   time_on_page_sec: number | null; scroll_depth_pct: number | null;
   created_at: string;
@@ -89,6 +89,8 @@ const CREATE_TABLES_SQL = `
     ch_term      TEXT,
     ch_type      TEXT,
     gclid        TEXT,
+    gbraid       TEXT,
+    wbraid       TEXT,
     fbclid       TEXT,
     landing_url  TEXT,
     referrer     TEXT,
@@ -118,6 +120,8 @@ function createSQLiteDB(dbPath: string): TrailDB {
   try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN time_on_page_sec INTEGER"); } catch {}
   try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN scroll_depth_pct INTEGER"); } catch {}
   try { sqlite.exec("ALTER TABLE accounts ADD COLUMN workspace_id TEXT"); } catch {}
+  try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN gbraid TEXT"); } catch {}
+  try { sqlite.exec("ALTER TABLE visitor_touchpoints ADD COLUMN wbraid TEXT"); } catch {}
 
   const s = <T>(sql: string) => sqlite.prepare(sql) as unknown as { all: (...a: unknown[]) => T[]; get: (...a: unknown[]) => T | undefined; run: (...a: unknown[]) => void };
 
@@ -174,16 +178,16 @@ function createSQLiteDB(dbPath: string): TrailDB {
       return row?.n ?? 0;
     },
     async insertTouchpoint(d) {
-      s(`INSERT INTO visitor_touchpoints (id,visitor_id,account_id,session_num,ch_source,ch_medium,ch_campaign,ch_term,ch_type,gclid,fbclid,landing_url,referrer,hostname) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(d.id, d.visitor_id, d.account_id, d.session_num, d.ch_source, d.ch_medium, d.ch_campaign, d.ch_term, d.ch_type, d.gclid, d.fbclid, d.landing_url, d.referrer, d.hostname);
+      s(`INSERT INTO visitor_touchpoints (id,visitor_id,account_id,session_num,ch_source,ch_medium,ch_campaign,ch_term,ch_type,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(d.id, d.visitor_id, d.account_id, d.session_num, d.ch_source, d.ch_medium, d.ch_campaign, d.ch_term, d.ch_type, d.gclid, d.gbraid, d.wbraid, d.fbclid, d.landing_url, d.referrer, d.hostname);
     },
     async upsertSession(visitorId, accountId, sessionHash) {
       s(`INSERT OR IGNORE INTO visitor_sessions (visitor_id,account_id,session_hash) VALUES (?,?,?)`).run(visitorId, accountId, sessionHash);
     },
     async getJourneyByVisitor(visitorId, accountId) {
       const sql = accountId
-        ? `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? AND account_id=? ORDER BY session_num ASC`
-        : `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? ORDER BY session_num ASC`;
+        ? `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? AND account_id=? ORDER BY session_num ASC`
+        : `SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=? ORDER BY session_num ASC`;
       return accountId ? s<JourneyEntry>(sql).all(visitorId, accountId) : s<JourneyEntry>(sql).all(visitorId);
     },
     async convertVisitor(leadId, visitorId, accountId, timeOnPageSec, scrollDepthPct) {
@@ -300,6 +304,8 @@ const CREATE_TABLES_PG = `
     ch_term      TEXT,
     ch_type      TEXT,
     gclid        TEXT,
+    gbraid       TEXT,
+    wbraid       TEXT,
     fbclid       TEXT,
     landing_url  TEXT,
     referrer     TEXT,
@@ -336,6 +342,8 @@ function createPostgresDB(url: string): TrailDB {
     await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS time_on_page_sec INTEGER");
     await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS scroll_depth_pct INTEGER");
     await sql.unsafe("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS workspace_id TEXT");
+    await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS gbraid TEXT");
+    await sql.unsafe("ALTER TABLE visitor_touchpoints ADD COLUMN IF NOT EXISTS wbraid TEXT");
     initialized = true;
   }
 
@@ -403,8 +411,8 @@ function createPostgresDB(url: string): TrailDB {
     async insertTouchpoint(d) {
       await init();
       await sql`
-        INSERT INTO visitor_touchpoints (id,visitor_id,account_id,session_num,ch_source,ch_medium,ch_campaign,ch_term,ch_type,gclid,fbclid,landing_url,referrer,hostname)
-        VALUES (${d.id},${d.visitor_id},${d.account_id},${d.session_num},${d.ch_source},${d.ch_medium},${d.ch_campaign},${d.ch_term},${d.ch_type},${d.gclid},${d.fbclid},${d.landing_url},${d.referrer},${d.hostname})
+        INSERT INTO visitor_touchpoints (id,visitor_id,account_id,session_num,ch_source,ch_medium,ch_campaign,ch_term,ch_type,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname)
+        VALUES (${d.id},${d.visitor_id},${d.account_id},${d.session_num},${d.ch_source},${d.ch_medium},${d.ch_campaign},${d.ch_term},${d.ch_type},${d.gclid},${d.gbraid},${d.wbraid},${d.fbclid},${d.landing_url},${d.referrer},${d.hostname})
       `;
     },
     async upsertSession(visitorId, accountId, sessionHash) {
@@ -414,8 +422,8 @@ function createPostgresDB(url: string): TrailDB {
     async getJourneyByVisitor(visitorId, accountId) {
       await init();
       const rows = accountId
-        ? await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY session_num ASC`
-        : await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} ORDER BY session_num ASC`;
+        ? await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY session_num ASC`
+        : await sql`SELECT session_num,ch_type,ch_source,ch_medium,ch_campaign,ch_term,gclid,gbraid,wbraid,fbclid,landing_url,referrer,hostname,time_on_page_sec,scroll_depth_pct,created_at FROM visitor_touchpoints WHERE visitor_id=${visitorId} ORDER BY session_num ASC`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as JourneyEntry[];
     },
     async convertVisitor(leadId, visitorId, accountId, timeOnPageSec, scrollDepthPct) {
