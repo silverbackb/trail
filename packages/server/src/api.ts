@@ -4,6 +4,8 @@ import type { TrailDB } from "./db.js";
 import { TRACKER_SCRIPT } from "./tracker.js";
 import { requireAuth } from "./auth.js";
 
+const MONTHLY_SESSION_QUOTA = parseInt(process.env.MONTHLY_SESSION_QUOTA ?? "5000", 10);
+
 const TouchpointSchema = z.object({
   visitor_id: z.string(),
   account_id: z.string(),
@@ -199,23 +201,11 @@ export function createApiRoutes(db: TrailDB) {
 
     const { visitor_id, account_id, channel, hostname } = parsed.data;
 
-    // Auto-create account if it doesn't exist yet in the database
-    let domainVal = hostname || "";
-    if (!domainVal && channel.landing_url) {
-      try {
-        domainVal = new URL(channel.landing_url).hostname;
-      } catch {}
+    // Only accept accounts created via the agent (linked to a workspace)
+    const workspaceId = await db.getAccountWorkspaceId(account_id);
+    if (!workspaceId) {
+      return c.json({ ok: true, ignored: "unknown_account" });
     }
-    if (!domainVal) {
-      domainVal = account_id;
-    }
-    const nameVal = domainVal
-      .replace(/^www\./i, "")
-      .split(".")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ") || account_id;
-
-    await db.createAccount(account_id, nameVal, domainVal, null);
 
     const sessionHash = Buffer.from(
       `${visitor_id}:${channel.referrer_type}:${channel.utm_source ?? ""}:${new Date().toISOString().slice(0, 10)}`
@@ -223,6 +213,13 @@ export function createApiRoutes(db: TrailDB) {
 
     if (await db.sessionExists(visitor_id, sessionHash)) {
       return c.json({ ok: true, duplicate: true });
+    }
+
+    // Enforce monthly session quota
+    const month = new Date().toISOString().slice(0, 7);
+    const monthlyCount = await db.getMonthlySessionCount(workspaceId, month);
+    if (monthlyCount >= MONTHLY_SESSION_QUOTA) {
+      return c.json({ ok: true, quota_exceeded: true });
     }
 
     const sessionNum = (await db.countVisitorTouchpoints(visitor_id, account_id)) + 1;
@@ -245,6 +242,7 @@ export function createApiRoutes(db: TrailDB) {
     });
 
     await db.upsertSession(visitor_id, account_id, sessionHash);
+    await db.incrementMonthlySessionCount(workspaceId, month);
 
     return c.json({ ok: true, session: sessionNum });
   });

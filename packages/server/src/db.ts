@@ -51,6 +51,9 @@ export interface TrailDB {
   upsertSession(visitorId: string, accountId: string, sessionHash: string): Promise<void>;
   getJourneyByVisitor(visitorId: string, accountId?: string): Promise<JourneyEntry[]>;
   convertVisitor(leadId: string, visitorId: string, accountId: string, timeOnPageSec?: number, scrollDepthPct?: number): Promise<void>;
+  getAccountWorkspaceId(accountId: string): Promise<string | null>;
+  getMonthlySessionCount(workspaceId: string, month: string): Promise<number>;
+  incrementMonthlySessionCount(workspaceId: string, month: string): Promise<void>;
   // mcp.ts
   createAccount(accountId: string, name: string, domain: string, workspaceId?: string | null): Promise<void>;
   listAccounts(workspaceId?: string | null): Promise<AccountRow[]>;
@@ -76,6 +79,12 @@ const CREATE_TABLES_SQL = `
     domain      TEXT NOT NULL,
     workspace_id TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS workspace_monthly_usage (
+    workspace_id  TEXT NOT NULL,
+    month         TEXT NOT NULL,
+    session_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (workspace_id, month)
   );
   CREATE TABLE IF NOT EXISTS visitor_touchpoints (
     id           TEXT PRIMARY KEY,
@@ -279,6 +288,17 @@ function createSQLiteDB(dbPath: string): TrailDB {
       s(`DELETE FROM visitor_touchpoints WHERE created_at < ?`).run(cutoff);
       return { removed: before };
     },
+    async getAccountWorkspaceId(accountId) {
+      const row = s<{ workspace_id: string | null }>(`SELECT workspace_id FROM accounts WHERE account_id = ?`).get(accountId);
+      return row?.workspace_id ?? null;
+    },
+    async getMonthlySessionCount(workspaceId, month) {
+      const row = s<{ n: number }>(`SELECT session_count as n FROM workspace_monthly_usage WHERE workspace_id = ? AND month = ?`).get(workspaceId, month);
+      return row?.n ?? 0;
+    },
+    async incrementMonthlySessionCount(workspaceId, month) {
+      s(`INSERT INTO workspace_monthly_usage (workspace_id, month, session_count) VALUES (?, ?, 1) ON CONFLICT (workspace_id, month) DO UPDATE SET session_count = session_count + 1`).run(workspaceId, month);
+    },
   };
 }
 
@@ -291,6 +311,12 @@ const CREATE_TABLES_PG = `
     domain      TEXT NOT NULL,
     workspace_id TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS workspace_monthly_usage (
+    workspace_id  TEXT NOT NULL,
+    month         TEXT NOT NULL,
+    session_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (workspace_id, month)
   );
   CREATE TABLE IF NOT EXISTS visitor_touchpoints (
     id           TEXT PRIMARY KEY,
@@ -547,6 +573,20 @@ function createPostgresDB(url: string): TrailDB {
       const [row] = await sql`SELECT COUNT(*)::int as n FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
       await sql`DELETE FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
       return { removed: (row as { n: number }).n ?? 0 };
+    },
+    async getAccountWorkspaceId(accountId) {
+      await init();
+      const rows = await sql`SELECT workspace_id FROM accounts WHERE account_id = ${accountId}`;
+      return (rows[0] as { workspace_id: string | null } | undefined)?.workspace_id ?? null;
+    },
+    async getMonthlySessionCount(workspaceId, month) {
+      await init();
+      const rows = await sql`SELECT session_count as n FROM workspace_monthly_usage WHERE workspace_id = ${workspaceId} AND month = ${month}`;
+      return ((rows[0] as { n: number } | undefined)?.n ?? 0) as number;
+    },
+    async incrementMonthlySessionCount(workspaceId, month) {
+      await init();
+      await sql`INSERT INTO workspace_monthly_usage (workspace_id, month, session_count) VALUES (${workspaceId}, ${month}, 1) ON CONFLICT (workspace_id, month) DO UPDATE SET session_count = workspace_monthly_usage.session_count + 1`;
     },
   };
 }
