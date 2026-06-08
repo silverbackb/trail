@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.0 — 2026-06-08
+
+### Ajouté
+- **Quota mensuel de sessions par workspace** : 5 000 sessions/mois incluses gratuitement. Au-delà, `POST /t` retourne `{ ok: true, quota_exceeded: true }` silencieusement.
+- **Table `workspace_monthly_usage`** : compteur atomique par workspace et par mois, créée automatiquement au démarrage (SQLite et PostgreSQL).
+- **Variable d'environnement `MONTHLY_SESSION_QUOTA`** : permet de surcharger la limite (défaut : 5000).
+
+### Modifié
+- **`POST /t` n'auto-crée plus les comptes** : les touchpoints sont ignorés si l'`account_id` est inconnu ou non lié à un workspace. Les comptes doivent être créés via `trail_create_account` (agent MCP) pour recevoir du tracking.
+
+---
+
 ## v0.7.6 — 2026-05-26
 
 ### Corrigé
