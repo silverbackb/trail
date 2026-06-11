@@ -5,6 +5,20 @@ import { TRACKER_SCRIPT } from "./tracker.js";
 import { requireAuth } from "./auth.js";
 
 const MONTHLY_SESSION_QUOTA = parseInt(process.env.MONTHLY_SESSION_QUOTA ?? "5000", 10);
+const SBB_MCP_URL = process.env.SBB_MCP_URL ?? "";
+const SBB_MCP_INTERNAL_SECRET = process.env.SBB_MCP_INTERNAL_SECRET ?? "";
+
+function billTouchpoint(workspaceId: string): void {
+  if (!SBB_MCP_URL || !SBB_MCP_INTERNAL_SECRET) return;
+  void fetch(`${SBB_MCP_URL}/internal/billing/debit`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-internal-secret": SBB_MCP_INTERNAL_SECRET,
+    },
+    body: JSON.stringify({ workspaceId, toolName: "trail_touchpoint", costEur: "0.0100" }),
+  }).catch(() => {});
+}
 
 const TouchpointSchema = z.object({
   visitor_id: z.string(),
@@ -243,6 +257,7 @@ export function createApiRoutes(db: TrailDB) {
 
     await db.upsertSession(visitor_id, account_id, sessionHash);
     await db.incrementMonthlySessionCount(workspaceId, month);
+    billTouchpoint(workspaceId);
 
     return c.json({ ok: true, session: sessionNum });
   });
