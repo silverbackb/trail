@@ -38,6 +38,7 @@ export interface ChannelRow { ch_type: string; leads: number; conversions: numbe
 export interface PathRow { lead_id: string; path: string; }
 export interface PerformanceRow { ch_type: string; visitors: number; leads: number; conversions: number; }
 export interface LeadRow { lead_id: string; ch_type: string; created_at: string; }
+export interface FirstTouchByHourRow { hour: number; leads: number; pct_of_total: number; }
 
 export interface TrailDB {
   // maintenance
@@ -68,6 +69,7 @@ export interface TrailDB {
   deleteVisitor(accountId: string, visitorId: string, workspaceId?: string | null): Promise<{ deleted: boolean; reason?: string; touchpoints_removed: number }>;
   deleteLead(accountId: string, leadId: string, workspaceId?: string | null): Promise<{ deleted: boolean; reason?: string; touchpoints_updated: number }>;
   purgeAccountData(accountId: string, workspaceId?: string | null): Promise<{ purged: boolean; reason?: string; visitors_removed: number; leads_removed: number }>;
+  getFirstTouchByHour(accountId: string): Promise<FirstTouchByHourRow[]>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -229,6 +231,27 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async listLeads(accountId, limit) {
       return s<LeadRow>(`SELECT lead_id, ch_type, created_at FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL GROUP BY lead_id ORDER BY MAX(created_at) DESC LIMIT ?`).all(accountId, limit);
+    },
+    async getFirstTouchByHour(accountId) {
+      const rows = s<{ hour: number; leads: number }>(`
+        WITH converted_visitors AS (
+          SELECT DISTINCT visitor_id FROM visitor_touchpoints
+          WHERE account_id=? AND converted=1
+        ),
+        first_touches AS (
+          SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour
+          FROM visitor_touchpoints
+          WHERE account_id=? AND visitor_id IN (SELECT visitor_id FROM converted_visitors)
+            AND created_at = (
+              SELECT MIN(created_at) FROM visitor_touchpoints t2
+              WHERE t2.visitor_id = visitor_touchpoints.visitor_id AND t2.account_id = visitor_touchpoints.account_id
+            )
+        ),
+        totals AS (SELECT COUNT(*) AS total FROM first_touches)
+        SELECT ft.hour, COUNT(*) AS leads, totals.total FROM first_touches ft, totals GROUP BY ft.hour, totals.total ORDER BY ft.hour
+      `).all(accountId, accountId);
+      const total = rows.reduce((s, r) => s + r.leads, 0);
+      return rows.map(r => ({ hour: r.hour, leads: r.leads, pct_of_total: total > 0 ? Math.round(r.leads * 1000 / total) / 10 : 0 }));
     },
     async checkAccountAccess(accountId, workspaceId) {
       if (!workspaceId) return true;
@@ -499,6 +522,32 @@ function createPostgresDB(url: string): TrailDB {
       await init();
       const rows = await sql`SELECT lead_id, ch_type, MAX(created_at) as created_at FROM visitor_touchpoints WHERE account_id=${accountId} AND lead_id IS NOT NULL GROUP BY lead_id, ch_type ORDER BY MAX(created_at) DESC LIMIT ${limit}`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as LeadRow[];
+    },
+    async getFirstTouchByHour(accountId) {
+      await init();
+      const rows = await sql`
+        WITH first_touches AS (
+          SELECT DISTINCT ON (visitor_id)
+            visitor_id,
+            EXTRACT(HOUR FROM created_at)::int AS hour
+          FROM visitor_touchpoints
+          WHERE account_id = ${accountId}
+            AND visitor_id IN (
+              SELECT DISTINCT visitor_id FROM visitor_touchpoints
+              WHERE account_id = ${accountId} AND converted = 1
+            )
+          ORDER BY visitor_id, created_at ASC
+        ),
+        totals AS (SELECT COUNT(*) AS total FROM first_touches)
+        SELECT
+          ft.hour,
+          COUNT(*)::int AS leads,
+          ROUND(COUNT(*) * 100.0 / t.total, 1)::float AS pct_of_total
+        FROM first_touches ft, totals t
+        GROUP BY ft.hour, t.total
+        ORDER BY ft.hour
+      `;
+      return rows as unknown as FirstTouchByHourRow[];
     },
     async checkAccountAccess(accountId, workspaceId) {
       if (!workspaceId) return true;

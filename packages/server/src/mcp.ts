@@ -173,6 +173,22 @@ fetch('${baseUrl}/convert', {
     return { content: [{ type: "text", text: `Leads (${rows.length}):\n\n${lines.join("\n")}` }] };
   });
 
+  server.registerTool("trail_get_first_touch_by_hour", {
+    description: "Get the distribution of leads by hour of first contact. Useful to determine if a time slot (e.g., 08h-09h) generates first-touch leads that convert later in the day.",
+    inputSchema: {
+      account_id: z.string().describe("Trail account ID"),
+    },
+  }, async ({ account_id }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
+    const data = await db.getFirstTouchByHour(account_id);
+    if (!data.length) return { content: [{ type: "text", text: `No converted leads found for account "${account_id}". No first-touch distribution available yet.` }] };
+
+    const lines = data.map(r => `${String(r.hour).padStart(2, "0")}h  ${String(r.leads).padStart(4)} leads  (${r.pct_of_total}%)`);
+    return { content: [{ type: "text", text: `First-touch by hour — ${account_id}:\n\nHour  Leads  % of total\n${"─".repeat(30)}\n${lines.join("\n")}` }] };
+  });
+
   return server;
 }
 
