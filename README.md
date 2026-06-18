@@ -101,9 +101,13 @@ Set trigger to **All Pages**.
 
 ---
 
-## Form conversion
+## Conversion signals
 
-Trail automatically detects form submissions. At submit time, it injects a hidden `trail_vid` field into the form — your backend, CRM, or webhook receives it alongside the other form fields, no extra code required.
+Trail automatically detects two types of conversion signals — no configuration required on your site.
+
+### Form submissions
+
+Trail detects form submissions automatically. At submit time, it injects a hidden `trail_vid` field into the form — your backend, CRM, or webhook receives it alongside the other form fields.
 
 To manually trigger a conversion (e.g. from a custom flow):
 
@@ -117,6 +121,30 @@ fetch('https://trail.silverbackbase.com/convert', {
     lead_id: 'contact@example.com',
   }),
 });
+```
+
+### Click-to-call and click-to-mail
+
+Trail automatically captures clicks on `<a href="tel:...">` and `<a href="mailto:...">` links — the most common phone and email contact patterns on local business sites.
+
+Each click is recorded as an intent signal with:
+- `click_type`: `tel` or `mail`
+- `device_type`: `mobile` or `desktop` (a `tel:` click on mobile is a real call attempt; on desktop it may not be)
+- The click is linked to the visitor's journey via `trail_vid`
+
+No site configuration needed. The tracker detects these links automatically via event delegation.
+
+Clicks appear in the visitor journey alongside sessions:
+
+```json
+GET /journey/:visitor_id
+{
+  "visitor_id": "...",
+  "sessions": [...],
+  "clicks": [
+    { "click_type": "tel", "device_type": "mobile", "hostname": "example.com", "created_at": "..." }
+  ]
+}
 ```
 
 ---

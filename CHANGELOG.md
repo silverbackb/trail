@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.0 — 2026-06-18
+
+### Ajouté
+- **Click-to-call et click-to-mail tracking** : le tracker détecte automatiquement les clics sur `<a href="tel:...">` et `<a href="mailto:...">` sans aucune configuration côté site client.
+- **Endpoint `POST /click`** : enregistre un clic d'intention (type `tel` ou `mail`) avec `visitor_id`, `account_id`, `device_type` (mobile/desktop) et `hostname`. Facturé comme un touchpoint.
+- **Table `visitor_clicks`** : nouvelle table dédiée (SQLite et PostgreSQL) avec index sur `(visitor_id, account_id)` et `(account_id, created_at)`.
+- **Enrichissement du journey** : `GET /journey/:visitor_id` retourne désormais `{ sessions, clicks }` — les clics d'intention apparaissent aux côtés des sessions dans le parcours SEVYA.
+- **Déduplication intra-session** : les clics répétés sur le même lien dans une fenêtre de 1 seconde sont ignorés côté tracker.
+- **Détection device** : chaque clic est taggé `mobile` ou `desktop` pour distinguer les intentions réelles.
+
+---
+
 ## v0.8.0 — 2026-06-08
 
 ### Ajouté
