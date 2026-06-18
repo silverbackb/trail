@@ -45,6 +45,46 @@ function trackSession(): void {
 const SUBMIT_DEDUP_MS = 3000;
 const _lastConvert = new WeakMap<HTMLFormElement, number>();
 
+const CLICK_DEDUP_MS = 1000;
+const _lastClickByKey = new Map<string, number>();
+
+function getDeviceType(): "mobile" | "desktop" {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    ? "mobile"
+    : "desktop";
+}
+
+function trackClickLinks(): void {
+  document.addEventListener("click", (e) => {
+    const link = (e.target as HTMLElement).closest("a");
+    if (!link) return;
+    const href = link.getAttribute("href") ?? "";
+    let click_type: "tel" | "mail" | null = null;
+    if (href.startsWith("tel:")) click_type = "tel";
+    else if (href.startsWith("mailto:")) click_type = "mail";
+    else return;
+
+    const key = `${click_type}:${href}`;
+    const now = Date.now();
+    const prev = _lastClickByKey.get(key);
+    if (typeof prev === "number" && now - prev < CLICK_DEDUP_MS) return;
+    _lastClickByKey.set(key, now);
+
+    fetch(`${_apiUrl}/click`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        visitor_id: _visitorId,
+        account_id: _accountId,
+        click_type,
+        device_type: getDeviceType(),
+        hostname: location.hostname,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  }, { capture: true, passive: true });
+}
+
 // Skip site-search forms so a search doesn't count as a conversion.
 // Conservative: only skip what is unambiguously a search (a lone search field,
 // GET method, no lead field) — anything with an email/phone/message is kept.
@@ -138,6 +178,7 @@ function init(): void {
 
   trackSession();
   trackForms();
+  trackClickLinks();
 }
 
 if (document.readyState === "loading") {

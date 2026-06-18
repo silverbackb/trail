@@ -40,6 +40,23 @@ export interface PerformanceRow { ch_type: string; visitors: number; leads: numb
 export interface LeadRow { lead_id: string; ch_type: string; created_at: string; }
 export interface FirstTouchByHourRow { hour: number; leads: number; pct_of_total: number; }
 
+export interface ClickInsert {
+  id: string;
+  visitor_id: string;
+  account_id: string;
+  click_type: "tel" | "mail";
+  device_type: string | null;
+  hostname: string | null;
+}
+
+export interface ClickEntry {
+  id: string;
+  click_type: string;
+  device_type: string | null;
+  hostname: string | null;
+  created_at: string;
+}
+
 export interface TrailDB {
   // maintenance
   purgeOldTouchpoints(olderThanDays: number): Promise<{ removed: number }>;
@@ -70,6 +87,8 @@ export interface TrailDB {
   deleteLead(accountId: string, leadId: string, workspaceId?: string | null): Promise<{ deleted: boolean; reason?: string; touchpoints_updated: number }>;
   purgeAccountData(accountId: string, workspaceId?: string | null): Promise<{ purged: boolean; reason?: string; visitors_removed: number; leads_removed: number }>;
   getFirstTouchByHour(accountId: string): Promise<FirstTouchByHourRow[]>;
+  recordClick(data: ClickInsert): Promise<void>;
+  getClicksByVisitor(visitorId: string, accountId: string): Promise<ClickEntry[]>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -121,6 +140,17 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_tp_visitor  ON visitor_touchpoints(visitor_id, account_id);
   CREATE INDEX IF NOT EXISTS idx_tp_lead     ON visitor_touchpoints(lead_id);
   CREATE INDEX IF NOT EXISTS idx_tp_account  ON visitor_touchpoints(account_id, created_at);
+  CREATE TABLE IF NOT EXISTS visitor_clicks (
+    id           TEXT PRIMARY KEY,
+    visitor_id   TEXT NOT NULL,
+    account_id   TEXT NOT NULL,
+    click_type   TEXT NOT NULL,
+    device_type  TEXT,
+    hostname     TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_clicks_visitor ON visitor_clicks(visitor_id, account_id);
+  CREATE INDEX IF NOT EXISTS idx_clicks_account ON visitor_clicks(account_id, created_at);
 `;
 
 function createSQLiteDB(dbPath: string): TrailDB {
@@ -322,6 +352,13 @@ function createSQLiteDB(dbPath: string): TrailDB {
     async incrementMonthlySessionCount(workspaceId, month) {
       s(`INSERT INTO workspace_monthly_usage (workspace_id, month, session_count) VALUES (?, ?, 1) ON CONFLICT (workspace_id, month) DO UPDATE SET session_count = session_count + 1`).run(workspaceId, month);
     },
+    async recordClick(d) {
+      s(`INSERT INTO visitor_clicks (id,visitor_id,account_id,click_type,device_type,hostname) VALUES (?,?,?,?,?,?)`)
+        .run(d.id, d.visitor_id, d.account_id, d.click_type, d.device_type, d.hostname);
+    },
+    async getClicksByVisitor(visitorId, accountId) {
+      return s<ClickEntry>(`SELECT id,click_type,device_type,hostname,created_at FROM visitor_clicks WHERE visitor_id=? AND account_id=? ORDER BY created_at ASC`).all(visitorId, accountId);
+    },
   };
 }
 
@@ -374,6 +411,17 @@ const CREATE_TABLES_PG = `
   CREATE INDEX IF NOT EXISTS idx_tp_visitor  ON visitor_touchpoints(visitor_id, account_id);
   CREATE INDEX IF NOT EXISTS idx_tp_lead     ON visitor_touchpoints(lead_id);
   CREATE INDEX IF NOT EXISTS idx_tp_account  ON visitor_touchpoints(account_id, created_at);
+  CREATE TABLE IF NOT EXISTS visitor_clicks (
+    id           TEXT PRIMARY KEY,
+    visitor_id   TEXT NOT NULL,
+    account_id   TEXT NOT NULL,
+    click_type   TEXT NOT NULL,
+    device_type  TEXT,
+    hostname     TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_clicks_visitor ON visitor_clicks(visitor_id, account_id);
+  CREATE INDEX IF NOT EXISTS idx_clicks_account ON visitor_clicks(account_id, created_at);
 `;
 
 function toISO(v: unknown): string {
@@ -636,6 +684,15 @@ function createPostgresDB(url: string): TrailDB {
     async incrementMonthlySessionCount(workspaceId, month) {
       await init();
       await sql`INSERT INTO workspace_monthly_usage (workspace_id, month, session_count) VALUES (${workspaceId}, ${month}, 1) ON CONFLICT (workspace_id, month) DO UPDATE SET session_count = workspace_monthly_usage.session_count + 1`;
+    },
+    async recordClick(d) {
+      await init();
+      await sql`INSERT INTO visitor_clicks (id,visitor_id,account_id,click_type,device_type,hostname) VALUES (${d.id},${d.visitor_id},${d.account_id},${d.click_type},${d.device_type},${d.hostname})`;
+    },
+    async getClicksByVisitor(visitorId, accountId) {
+      await init();
+      const rows = await sql`SELECT id,click_type,device_type,hostname,created_at FROM visitor_clicks WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY created_at ASC`;
+      return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as ClickEntry[];
     },
   };
 }

@@ -49,6 +49,14 @@ const ConvertSchema = z.object({
   scroll_depth_pct: z.number().int().min(0).max(100).optional(),
 });
 
+const ClickSchema = z.object({
+  visitor_id: z.string(),
+  account_id: z.string(),
+  click_type: z.enum(["tel", "mail"]),
+  device_type: z.enum(["mobile", "desktop"]).optional(),
+  hostname: z.string().optional(),
+});
+
 export function createApiRoutes(db: TrailDB) {
   const app = new Hono();
 
@@ -282,7 +290,8 @@ export function createApiRoutes(db: TrailDB) {
     }
 
     const rows = await db.getJourneyByVisitor(visitor_id, account_id);
-    return c.json({ visitor_id, sessions: rows });
+    const clicks = account_id ? await db.getClicksByVisitor(visitor_id, account_id) : [];
+    return c.json({ visitor_id, sessions: rows, clicks });
   });
 
   app.post("/convert", async (c) => {
@@ -291,6 +300,31 @@ export function createApiRoutes(db: TrailDB) {
     if (!parsed.success) return c.json({ error: "invalid" }, 400);
     const { visitor_id, account_id, lead_id, time_on_page_sec, scroll_depth_pct } = parsed.data;
     await db.convertVisitor(lead_id, visitor_id, account_id, time_on_page_sec, scroll_depth_pct);
+    return c.json({ ok: true });
+  });
+
+  app.post("/click", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = ClickSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "invalid" }, 400);
+
+    const { visitor_id, account_id, click_type, device_type, hostname } = parsed.data;
+
+    const workspaceId = await db.getAccountWorkspaceId(account_id);
+    if (!workspaceId) {
+      return c.json({ ok: true, ignored: "unknown_account" });
+    }
+
+    await db.recordClick({
+      id: crypto.randomUUID(),
+      visitor_id,
+      account_id,
+      click_type,
+      device_type: device_type ?? null,
+      hostname: hostname ?? null,
+    });
+
+    billTouchpoint(workspaceId);
     return c.json({ ok: true });
   });
 
