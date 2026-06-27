@@ -1,6 +1,6 @@
 {
   "name": "@silverbackbase/trail",
-  "version": "0.8.0",
+  "version": "0.9.1",
   "description": "Multi-touch attribution tracker — self-hosted, runs anywhere Node.js runs",
   "license": "MIT",
   "type": "module",

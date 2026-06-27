@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import type { Context } from "hono";
 import type { TrailDB } from "./db.js";
+import type { ClickStatRow } from "./db.js";
 
 function toLocalTime(utc: string): string {
   const tz = process.env.TRAIL_TZ ?? "Europe/Paris";
@@ -187,6 +188,25 @@ fetch('${baseUrl}/convert', {
 
     const lines = data.map(r => `${String(r.hour).padStart(2, "0")}h  ${String(r.leads).padStart(4)} leads  (${r.pct_of_total}%)`);
     return { content: [{ type: "text", text: `First-touch by hour — ${account_id}:\n\nHour  Leads  % of total\n${"─".repeat(30)}\n${lines.join("\n")}` }] };
+  });
+
+  server.registerTool("trail_get_click_stats", {
+    description: "Get click-to-call (tel:) and click-to-mail (mailto:) stats grouped by acquisition channel and device type. Use this to measure phone and email click intent by traffic source — critical for local service businesses where phone calls are the primary conversion signal before a form is ever submitted. Channel is first-touch attribution (the channel that brought the visitor). Returns: channel, click_type (tel or mail), device_type (mobile or desktop), clicks count.",
+    inputSchema: {
+      account_id: z.string().describe("Trail account ID"),
+    },
+  }, async ({ account_id }) => {
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return { content: [{ type: "text", text: `Error: Account "${account_id}" not found or access denied.` }] };
+
+    const rows: ClickStatRow[] = await db.getClickStats(account_id);
+    if (!rows.length) return { content: [{ type: "text", text: `No click-to-call or click-to-mail data for "${account_id}". Either no tel: or mailto: links have been clicked, or the tracker is not yet installed.` }] };
+
+    const total = rows.reduce((s, r) => s + r.clicks, 0);
+    const lines = rows.map((r) =>
+      `${r.channel.padEnd(22)} ${r.click_type.padEnd(5)} ${(r.device_type ?? "unknown").padEnd(10)} ${String(r.clicks).padStart(4)} clicks`
+    );
+    return { content: [{ type: "text", text: `Click-to-call/mail stats — ${account_id} (${total} total)\n\n${"Channel".padEnd(22)} Type  Device     Count\n${"─".repeat(52)}\n${lines.join("\n")}\n\nChannel = first-touch source of the visitor when they arrived on the site.` }] };
   });
 
   return server;

@@ -57,6 +57,13 @@ export interface ClickEntry {
   created_at: string;
 }
 
+export interface ClickStatRow {
+  channel: string;
+  click_type: string;
+  device_type: string | null;
+  clicks: number;
+}
+
 export interface TrailDB {
   // maintenance
   purgeOldTouchpoints(olderThanDays: number): Promise<{ removed: number }>;
@@ -89,6 +96,7 @@ export interface TrailDB {
   getFirstTouchByHour(accountId: string): Promise<FirstTouchByHourRow[]>;
   recordClick(data: ClickInsert): Promise<void>;
   getClicksByVisitor(visitorId: string, accountId: string): Promise<ClickEntry[]>;
+  getClickStats(accountId: string): Promise<ClickStatRow[]>;
 }
 
 // ── SQLite ────────────────────────────────────────────────────────────────────
@@ -301,6 +309,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
       }
       s(`DELETE FROM visitor_sessions WHERE account_id=?`).run(accountId);
       s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
+      s(`DELETE FROM visitor_clicks WHERE account_id=?`).run(accountId);
       s(`DELETE FROM accounts WHERE account_id=?`).run(accountId);
       return { deleted: true, visitors, leads };
     },
@@ -312,6 +321,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
       const n = s<{ n: number }>(`SELECT COUNT(*) as n FROM visitor_touchpoints WHERE account_id=? AND visitor_id=?`).get(accountId, visitorId)?.n ?? 0;
       s(`DELETE FROM visitor_sessions WHERE account_id=? AND visitor_id=?`).run(accountId, visitorId);
       s(`DELETE FROM visitor_touchpoints WHERE account_id=? AND visitor_id=?`).run(accountId, visitorId);
+      s(`DELETE FROM visitor_clicks WHERE account_id=? AND visitor_id=?`).run(accountId, visitorId);
       return { deleted: true, touchpoints_removed: n };
     },
     async deleteLead(accountId, leadId, workspaceId) {
@@ -332,6 +342,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
       const leads = s<{ n: number }>(`SELECT COUNT(DISTINCT lead_id) as n FROM visitor_touchpoints WHERE account_id=? AND lead_id IS NOT NULL`).get(accountId)?.n ?? 0;
       s(`DELETE FROM visitor_sessions WHERE account_id=?`).run(accountId);
       s(`DELETE FROM visitor_touchpoints WHERE account_id=?`).run(accountId);
+      s(`DELETE FROM visitor_clicks WHERE account_id=?`).run(accountId);
       return { purged: true, visitors_removed: visitors, leads_removed: leads };
     },
     async purgeOldTouchpoints(olderThanDays) {
@@ -339,6 +350,7 @@ function createSQLiteDB(dbPath: string): TrailDB {
       const before = s<{ n: number }>(`SELECT COUNT(*) as n FROM visitor_touchpoints WHERE created_at < ?`).get(cutoff)?.n ?? 0;
       s(`DELETE FROM visitor_sessions WHERE visitor_id IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at < ?) AND visitor_id NOT IN (SELECT DISTINCT visitor_id FROM visitor_touchpoints WHERE created_at >= ?)`).run(cutoff, cutoff);
       s(`DELETE FROM visitor_touchpoints WHERE created_at < ?`).run(cutoff);
+      s(`DELETE FROM visitor_clicks WHERE created_at < ?`).run(cutoff);
       return { removed: before };
     },
     async getAccountWorkspaceId(accountId) {
@@ -358,6 +370,22 @@ function createSQLiteDB(dbPath: string): TrailDB {
     },
     async getClicksByVisitor(visitorId, accountId) {
       return s<ClickEntry>(`SELECT id,click_type,device_type,hostname,created_at FROM visitor_clicks WHERE visitor_id=? AND account_id=? ORDER BY created_at ASC`).all(visitorId, accountId);
+    },
+    async getClickStats(accountId) {
+      return s<ClickStatRow>(`
+        SELECT
+          COALESCE(ft.ch_type, 'unknown') AS channel,
+          c.click_type,
+          c.device_type,
+          COUNT(*) AS clicks
+        FROM visitor_clicks c
+        LEFT JOIN (
+          SELECT visitor_id, ch_type FROM visitor_touchpoints WHERE account_id=? AND session_num=1
+        ) ft ON ft.visitor_id = c.visitor_id
+        WHERE c.account_id=?
+        GROUP BY channel, c.click_type, c.device_type
+        ORDER BY clicks DESC
+      `).all(accountId, accountId);
     },
   };
 }
@@ -619,6 +647,7 @@ function createPostgresDB(url: string): TrailDB {
       }
       await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId}`;
       await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      await sql`DELETE FROM visitor_clicks WHERE account_id=${accountId}`;
       await sql`DELETE FROM accounts WHERE account_id=${accountId}`;
       return { deleted: true, visitors, leads };
     },
@@ -632,6 +661,7 @@ function createPostgresDB(url: string): TrailDB {
       const n = (cnt as { n: number }).n ?? 0;
       await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
       await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
+      await sql`DELETE FROM visitor_clicks WHERE account_id=${accountId} AND visitor_id=${visitorId}`;
       return { deleted: true, touchpoints_removed: n };
     },
     async deleteLead(accountId, leadId, workspaceId) {
@@ -657,6 +687,7 @@ function createPostgresDB(url: string): TrailDB {
       const leads_removed = (lcnt as { n: number }).n ?? 0;
       await sql`DELETE FROM visitor_sessions WHERE account_id=${accountId}`;
       await sql`DELETE FROM visitor_touchpoints WHERE account_id=${accountId}`;
+      await sql`DELETE FROM visitor_clicks WHERE account_id=${accountId}`;
       return { purged: true, visitors_removed, leads_removed };
     },
     async purgeOldTouchpoints(olderThanDays) {
@@ -669,6 +700,7 @@ function createPostgresDB(url: string): TrailDB {
       `;
       const [row] = await sql`SELECT COUNT(*)::int as n FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
       await sql`DELETE FROM visitor_touchpoints WHERE created_at < ${cutoff}`;
+      await sql`DELETE FROM visitor_clicks WHERE created_at < ${cutoff}`;
       return { removed: (row as { n: number }).n ?? 0 };
     },
     async getAccountWorkspaceId(accountId) {
@@ -693,6 +725,27 @@ function createPostgresDB(url: string): TrailDB {
       await init();
       const rows = await sql`SELECT id,click_type,device_type,hostname,created_at FROM visitor_clicks WHERE visitor_id=${visitorId} AND account_id=${accountId} ORDER BY created_at ASC`;
       return rows.map(r => ({ ...r, created_at: toISO(r.created_at) })) as ClickEntry[];
+    },
+    async getClickStats(accountId) {
+      await init();
+      const rows = await sql`
+        SELECT
+          COALESCE(ft.ch_type, 'unknown') AS channel,
+          c.click_type,
+          c.device_type,
+          COUNT(*)::int AS clicks
+        FROM visitor_clicks c
+        LEFT JOIN (
+          SELECT DISTINCT ON (visitor_id) visitor_id, ch_type
+          FROM visitor_touchpoints
+          WHERE account_id = ${accountId}
+          ORDER BY visitor_id, session_num ASC
+        ) ft ON ft.visitor_id = c.visitor_id
+        WHERE c.account_id = ${accountId}
+        GROUP BY channel, c.click_type, c.device_type
+        ORDER BY clicks DESC
+      `;
+      return rows as unknown as ClickStatRow[];
     },
   };
 }

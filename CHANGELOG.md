@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.1 — 2026-06-27
+
+### Ajouté
+- **Outil MCP `trail_get_click_stats`** : expose les clics `tel:` et `mailto:` groupés par canal d'acquisition (first-touch), type de clic et device (mobile/desktop). Permet aux agents de mesurer l'intention d'appel par source de trafic sans attendre une soumission de formulaire.
+
+### Corrigé
+- **Intégrité des données** : `purgeAccountData`, `deleteVisitor`, `deleteAccount` (force) et `purgeOldTouchpoints` effacent maintenant aussi les entrées `visitor_clicks` correspondantes (SQLite et PostgreSQL). Sans ce correctif, les clics orphelins persistaient après suppression d'un compte ou d'un visiteur.
+- **Version package.json** : corrigée de `0.8.0` à `0.9.0` (décalage avec le CHANGELOG introduit lors de la release v0.9.0).
+
+---
+
 ## v0.9.0 — 2026-06-18
 
 ### Ajouté
