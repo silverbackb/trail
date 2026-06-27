@@ -151,6 +151,15 @@ export function createApiRoutes(db: TrailDB) {
     return c.json({ account_id, model: "first_touch", data });
   });
 
+  app.get("/accounts/:account_id/analytics/click-stats", requireAuth, async (c) => {
+    const workspaceId = (c.get as any)("workspaceId") as string | null;
+    const account_id = c.req.param("account_id");
+    const hasAccess = await db.checkAccountAccess(account_id, workspaceId);
+    if (!hasAccess) return c.json({ error: "Access denied" }, 403);
+    const rows = await db.getClickStats(account_id);
+    return c.json({ account_id, rows });
+  });
+
   app.get("/accounts/:account_id/leads", requireAuth, async (c) => {
     const workspaceId = (c.get as any)("workspaceId") as string | null;
     const account_id = c.req.param("account_id");
